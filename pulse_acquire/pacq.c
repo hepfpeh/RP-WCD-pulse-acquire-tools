@@ -18,9 +18,11 @@ typedef struct pa_config_s
 {
     uint32_t    Pre_Trigger_Points;
     uint32_t    Pos_Trigger_Points;
-    uint32_t    Capture_time_secs;
-    const char* File_Prefix;
-    uint32_t    Pulses_Per_File;
+    int32_t     Trigger_Level;
+    uint32_t    Capture_Time_Secs;
+    char        File_Prefix[20];
+    uint32_t    File_Time_Secs;
+    bool        Parse_errors;
 } pa_config_t;
 
 static int pa_config_handler(void* user, const char* section, const char* name,
@@ -30,16 +32,83 @@ static int pa_config_handler(void* user, const char* section, const char* name,
 
     #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
     if (MATCH("Capture", "Pre_Trigger_Points")) {
-        pconfig->Pre_Trigger_Points = atoi(value);
+        int tmp = atoi(value);
+        if( (tmp > 0) && (tmp < ADC_BUFFER_SIZE) )
+            pconfig->Pre_Trigger_Points = tmp;
+        else
+        {
+            printf("\nInvalid \"Pre_Trigger_Points\" value in config file (%i): Must be between 0 and %i\n", tmp, ADC_BUFFER_SIZE);
+//             printf("\tKeeping default (%i).\n", pconfig->Pre_Trigger_Points);
+            pconfig->Parse_errors = true;
+        }
     } else if (MATCH("Capture", "Pos_Trigger_Points")) {
-        pconfig->Pos_Trigger_Points = atoi(value);
-    } else if (MATCH("Capture", "Capture_time_secs")) {
-        pconfig->Capture_time_secs = atoi(value);
+        int tmp = atoi(value);
+        if( (tmp > 0) && (tmp < ADC_BUFFER_SIZE) )
+            pconfig->Pos_Trigger_Points = tmp;
+        else
+        {
+            printf("\nInvalid \"Pos_Trigger_Points\" value in config file (%i): Must be between 0 and %i\n", tmp, ADC_BUFFER_SIZE);
+//             printf("\tKeeping default (%i).\n", pconfig->Pos_Trigger_Points);
+            pconfig->Parse_errors = true;
+        }
+    } else if (MATCH("Capture", "Trigger_Level")) {
+        int tmp = atoi(value);
+        if( (tmp > -8193) && (tmp < 8192) )
+            pconfig->Trigger_Level = tmp;
+        else
+        {
+            printf("\nInvalid \"Trigger_Level\" value in config file (%i): Must be between -8192 and +8191\n",tmp);
+//             printf("\tKeeping default (%i).\n", pconfig->Trigger_Level);
+            pconfig->Parse_errors = true;
+        }
+    } else if (MATCH("Capture", "Capture_Time_Secs")) {
+        int tmp = atoi(value);
+        if( tmp >= 0 )
+            pconfig->Capture_Time_Secs = tmp;
+        else
+        {
+            printf("\nInvalid \"Capture_Time_Secs\" value in config file (%i): can't be negative\n", tmp);
+//             printf("\tKeeping default (%i).\n", pconfig->Capture_Time_Secs);
+            pconfig->Parse_errors = true;
+        }
     } else if (MATCH("File", "File_Prefix")) {
-        pconfig->File_Prefix = strdup(value);
-    } else if (MATCH("File", "Pulses_Per_File")) {
-        pconfig->Pulses_Per_File = atoi(value);
+        //char bad_chars[] = "!@%^*~|";
+        char bad_chars[] = "/\0";
+        bool invalid_found = false;
+        int i;
+        for (i = 0; i < strlen(bad_chars); ++i) {
+            if (strchr(value, bad_chars[i]) != NULL) {
+                invalid_found = true;
+                break;
+            }
+        }
+        if (!invalid_found)
+            if( strlen(value) < 20 )
+                strcpy( pconfig->File_Prefix, value );
+            else
+            {
+                printf("\nInvalid \"File_Prefix\": File prefix must have less than 20 characters.\n");
+//                 printf("\tKeeping default (%s).\n", pconfig->File_Prefix);
+                pconfig->Parse_errors = true;
+            }
+        else
+        {
+            printf("\nInvalid \"File_Prefix\": Ivalid character(s) for a file name used.\n");
+//             printf("\tKeeping default (%s).\n", pconfig->File_Prefix);
+            pconfig->Parse_errors = true;
+        }
+    } else if (MATCH("File", "File_Time_Secs")) {
+        int tmp = atoi(value);
+        if( tmp >= 0 )
+            pconfig->File_Time_Secs = tmp;
+        else
+        {
+            printf("\nInvalid \"File_Time_Secs\" value in config file (%i): can't be negative\n", tmp);
+//             printf("\tKeeping default (%i).\n", pconfig->File_Time_Secs);
+            pconfig->Parse_errors = true;
+        }
     } else {
+        pconfig->Parse_errors = true;
         return 0;  /* unknown section/name, error */
     }
     return 1;
@@ -57,6 +126,13 @@ static const int ADC_BITS_MAK = 0x3FFF;
 // This must be of type `volatile` to prevent
 // the compiler from optimizing away the
 // while loop condition.
+
+typedef struct pa_flags_s
+{
+    bool Stop;
+    bool ShowInfo;
+} pa_flags_t;
+
 volatile sig_atomic_t stop;
 
 // Called when we recieve SIGINT (CTRL+C)
@@ -95,6 +171,36 @@ void *Timer( void *targs )
     }
     printf("\nTimer stopping\n");
 }
+
+int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *info )
+{
+    config->Pre_Trigger_Points = 5;
+    config->Pos_Trigger_Points = 27;
+    config->Trigger_Level      = -819;
+    config->Capture_Time_Secs  = 1;
+    strcpy( config->File_Prefix, "pa_out-");
+    config->File_Time_Secs     = 60;
+    config->Parse_errors       = false;
+    
+    flags->Stop     = false;
+    flags->ShowInfo = false;
+    
+    info->n_pulses = 0;
+    info->t_errors = 0;
+    info->e_time   = 0;
+
+    return 0;
+}
+
+int pa_CheckConfig( pa_config_t *config )
+{
+    if( ( config->Pre_Trigger_Points + config->Pos_Trigger_Points )  > ADC_BUFFER_SIZE ){
+        printf("\nError: ( Pre_Trigger_Points + Pos_Trigger_Points ) must be less than %i\n\n", ADC_BUFFER_SIZE);
+        return 1;
+    }
+    return 0;
+}
+
 
 int pa_init()
 {
@@ -145,14 +251,44 @@ int pa_settings()
 
 int main(int argc, char **argv)
 {
-    pa_config_t pa_config;
-
-    if (ini_parse("test.ini", pa_config_handler, &pa_config) < 0) {
-        printf("Can't load 'test.ini'\n");
+    if(argc < 2){
+        printf("\n  Usage: %s Config_file\n\n", argv[0]);
         return 1;
     }
-    printf("Config loaded from 'test.ini':\nPre_Trigger_Points=%i\nPos_Trigger_Points=%i\nCapture_time_secs=%i\nFile_Prefix=%s\nPulses_Per_File=%i\n",
-        pa_config.Pre_Trigger_Points, pa_config.Pos_Trigger_Points, pa_config.Capture_time_secs,pa_config.File_Prefix,pa_config.Pulses_Per_File);
+    
+    pa_config_t pa_config;
+    volatile pa_flags_t  pa_flags;
+    pa_info_t   pa_info;
+    
+    pa_SetDefaults( &pa_config, &pa_flags, &pa_info );
+
+    if (ini_parse(argv[1], pa_config_handler, &pa_config) != 0) {
+        printf("\nCan't load '%s' or has syntax errors\n\n",argv[1]);
+        return 1;
+    }
+    
+    
+    if( pa_config.Parse_errors ){
+        printf("\nBad configuration file\n\n");
+        return 1;
+    }
+    
+    if( pa_CheckConfig( &pa_config ) != 0 )
+        return 1;
+    
+    
+    printf("\n|-------------------------------- Pulse Acquire Tool -----------------------------------|");
+    printf("\n| Configuration values");
+    printf("\n| ====================");
+    printf("\n|   %-25s%i", "Pre_Trigger_Points:", pa_config.Pre_Trigger_Points);
+    printf("\n|   %-25s%i", "Pos_Trigger_Points:", pa_config.Pos_Trigger_Points);
+    printf("\n|   %-25s%i", "Trigger_Level:", pa_config.Trigger_Level);
+    printf("\n|   %-25s%i", "Capture_Time_Secs:", pa_config.Capture_Time_Secs);
+    printf("\n|   %-25s%s", "File_Prefix:", pa_config.File_Prefix);
+    printf("\n|   %-25s%i", "File_Time_Secs:", pa_config.File_Time_Secs);
+    printf("\n|---------------------------------------------------------------------------------------|\n");
+    
+    
     return 0;
     
     signal(SIGINT, inthand);
