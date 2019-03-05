@@ -25,6 +25,50 @@ typedef struct pa_config_s
     bool        Parse_errors;
 } pa_config_t;
 
+
+/* ADC acquisition bits mask. */
+static const int ADC_BITS_MAK = 0x3FFF;
+
+#define PRE_TRIGGER_POINTS  5
+#define POST_TRIGGER_POINTS 27
+#define CAPTURING_TIME_SEC  10
+//#define DATA_POINTS 64
+//#define DATA_POINTS_2 (DATA_POINTS/2)
+
+
+typedef struct pa_flags_s
+{
+    bool Running;
+    bool ShowInfo; //Actualy unused
+} pa_flags_t;
+
+volatile sig_atomic_t stop;
+
+
+
+
+typedef struct pa_info_s 
+{
+    uint32_t n_pulses;
+    uint32_t t_errors;
+    uint32_t e_time;
+} pa_info_t;
+
+
+typedef struct pa_timer_data_s
+{
+    uint32_t *T_time; // Capture time
+    uint32_t *E_time; // Elapsed time
+} pa_timer_data_t;
+
+/* Program flags must be globals */
+// This must be of type `volatile` to prevent
+// the compiler from optimizing away the
+// while loop condition.
+
+volatile pa_flags_t  pa_flags;
+
+
 static int pa_config_handler(void* user, const char* section, const char* name,
                    const char* value)
 {
@@ -114,65 +158,78 @@ static int pa_config_handler(void* user, const char* section, const char* name,
     return 1;
 }
 
-/* ADC acquisition bits mask. */
-static const int ADC_BITS_MAK = 0x3FFF;
-
-#define PRE_TRIGGER_POINTS  5
-#define POST_TRIGGER_POINTS 27
-#define CAPTURING_TIME_SEC  10
-//#define DATA_POINTS 64
-//#define DATA_POINTS_2 (DATA_POINTS/2)
-
-// This must be of type `volatile` to prevent
-// the compiler from optimizing away the
-// while loop condition.
-
-typedef struct pa_flags_s
-{
-    bool Stop;
-    bool ShowInfo;
-} pa_flags_t;
-
-volatile sig_atomic_t stop;
-
 // Called when we recieve SIGINT (CTRL+C)
 // which then stops the infinite loop in main().
+// void inthand(int signum) 
+// {
+//    stop=1;
+// }
+
 void inthand(int signum) 
 {
-   stop=1;
+   pa_flags.Running = false;
 }
-
-
-
-typedef struct pa_info_s 
-{
-    uint32_t n_pulses;
-    uint32_t t_errors;
-    uint32_t e_time;
-} pa_info_t;
 
 // timer
 volatile bool ShowInfo = false;
 
+// void *Timer( void *targs )
+// {
+//     pa_info_t *pa_info = (pa_info_t*)targs;
+//     printf("\nTimer starting\n");
+//     struct timespec Start_clock, Current_clock;
+//     clock_gettime(CLOCK_REALTIME, &Start_clock);
+//     double elapsed_seconds;
+//     while(!stop)
+//     {
+//         sleep(1);
+//         ShowInfo = true;
+//         clock_gettime(CLOCK_REALTIME, &Current_clock);
+//         pa_info->e_time = Current_clock.tv_sec - Start_clock.tv_sec;
+//         if( pa_info->e_time > ( CAPTURING_TIME_SEC - 1 ) ) stop = 1;
+//     }
+//     printf("\nTimer stopping\n");
+// }
+
+
 void *Timer( void *targs )
 {
-    pa_info_t *pa_info = (pa_info_t*)targs;
-    printf("\nTimer starting\n");
-    struct timespec Start_clock, Current_clock;
+    pa_timer_data_t *timer_data = (pa_timer_data_t*)targs;
+//     printf("Pointers (3): %i %i\n", timer_data->T_time, timer_data->E_time );
+//     printf("\nTimer starting\n");
+    struct timespec OneSec, Start_clock, Current_clock;
+    OneSec.tv_sec=1;
+    OneSec.tv_nsec=0;
     clock_gettime(CLOCK_REALTIME, &Start_clock);
-    double elapsed_seconds;
-    while(!stop)
+    while( pa_flags.Running )
     {
-        sleep(1);
-        ShowInfo = true;
+        clock_nanosleep(CLOCK_REALTIME, 0, &OneSec, NULL);
         clock_gettime(CLOCK_REALTIME, &Current_clock);
-        pa_info->e_time = Current_clock.tv_sec - Start_clock.tv_sec;
-        if( pa_info->e_time > ( CAPTURING_TIME_SEC - 1 ) ) stop = 1;
+         *timer_data->E_time = Current_clock.tv_sec - Start_clock.tv_sec;
+        if( *timer_data->E_time > ( *timer_data->T_time - 1 ) ) pa_flags.Running = false;
     }
-    printf("\nTimer stopping\n");
+//     printf("\nTimer stopping\n");
 }
 
-int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *info )
+
+void *DisplayInfo( void *targs)
+{
+    pa_info_t *pa_info = (pa_info_t*)targs;
+    uint32_t rate = 0;
+    uint32_t l_count = 0;
+    sleep(1);
+    while( pa_flags.Running )
+    {
+        rate = pa_info->n_pulses - l_count;
+        l_count = pa_info->n_pulses;
+        printf("\r| ET:%7i s | PC:%7i | R:%5i Hz | TEC:%7i |", pa_info->e_time, pa_info->n_pulses, rate, pa_info->t_errors);
+        fflush(stdout);
+        sleep(1);
+    }
+}
+
+
+int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *info, pa_timer_data_t *timer_data)
 {
     config->Pre_Trigger_Points = 5;
     config->Pos_Trigger_Points = 27;
@@ -182,12 +239,15 @@ int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *
     config->File_Time_Secs     = 60;
     config->Parse_errors       = false;
     
-    flags->Stop     = false;
+    flags->Running  = false;
     flags->ShowInfo = false;
     
     info->n_pulses = 0;
     info->t_errors = 0;
     info->e_time   = 0;
+    
+    timer_data->T_time = &config->Capture_Time_Secs;
+    timer_data->E_time = &info->e_time;
 
     return 0;
 }
@@ -219,10 +279,16 @@ int pa_stop()
     return 0;
 }
 
-int pa_settings()
+int pa_settings( pa_config_t *config )
 {
     /* Setting parameters */
 
+    uint32_t TL=0;
+    
+    if( config->Trigger_Level >= 0 )
+        TL = config->Trigger_Level;
+    else
+        TL = 16384 + config->Trigger_Level;
     
     /* Threshold level for trigger in channel A in ADC counts.
      * 
@@ -230,7 +296,8 @@ int pa_settings()
      * i.e. O V in input. For LV gain +1 V is 8191. Negative values
      * are expressed as 2-complement to 2^14, thus -1 V is 8192
     */
-    osc_SetThresholdChA(15565); // 819 ADC counts below "0 level" (aprox. -0.1 V)
+//    osc_SetThresholdChA(15565); // 819 ADC counts below "0 level" (aprox. -0.1 V)
+    osc_SetThresholdChA( TL );
     osc_SetThresholdChB(0);
     
     /* Hysterisis in threshold for channel A in ADC counts*/
@@ -242,7 +309,8 @@ int pa_settings()
     osc_SetDecimation(1); // 125 msps
     
     /* Set trigger delay in decimated units */
-    osc_SetTriggerDelay( 2 * POST_TRIGGER_POINTS  ); 
+//    osc_SetTriggerDelay( 2 * POST_TRIGGER_POINTS  );
+    osc_SetTriggerDelay( 3*config->Pos_Trigger_Points  ); 
     
     return 0;
 }
@@ -256,11 +324,16 @@ int main(int argc, char **argv)
         return 1;
     }
     
-    pa_config_t pa_config;
-    volatile pa_flags_t  pa_flags;
-    pa_info_t   pa_info;
+    pa_config_t     pa_config;
+    pa_info_t       pa_info;
+    pa_timer_data_t pa_timer_data;
     
-    pa_SetDefaults( &pa_config, &pa_flags, &pa_info );
+//     printf("Pointers (1): %i %i\n", &pa_config.Capture_Time_Secs, &pa_info.e_time );
+    
+    pa_SetDefaults( &pa_config, &pa_flags, &pa_info, &pa_timer_data );
+    
+    
+//     printf("Pointers (2): %i %i\n", pa_timer_data.T_time, pa_timer_data.E_time );
 
     if (ini_parse(argv[1], pa_config_handler, &pa_config) != 0) {
         printf("\nCan't load '%s' or has syntax errors\n\n",argv[1]);
@@ -277,7 +350,7 @@ int main(int argc, char **argv)
         return 1;
     
     
-    printf("\n|-------------------------------- Pulse Acquire Tool -----------------------------------|");
+    printf("\n|--------------------------- Pulse Acquire Tool ------------------------------|");
     printf("\n| Configuration values");
     printf("\n| ====================");
     printf("\n|   %-25s%i", "Pre_Trigger_Points:", pa_config.Pre_Trigger_Points);
@@ -286,14 +359,15 @@ int main(int argc, char **argv)
     printf("\n|   %-25s%i", "Capture_Time_Secs:", pa_config.Capture_Time_Secs);
     printf("\n|   %-25s%s", "File_Prefix:", pa_config.File_Prefix);
     printf("\n|   %-25s%i", "File_Time_Secs:", pa_config.File_Time_Secs);
-    printf("\n|---------------------------------------------------------------------------------------|\n");
+    printf("\n|-----------------------------------------------------------------------------|\n");
     
     
-    return 0;
+//    return 0;
     
     signal(SIGINT, inthand);
     
-    const uint16_t BuffSize = PRE_TRIGGER_POINTS + POST_TRIGGER_POINTS;
+//     const uint16_t BuffSize = PRE_TRIGGER_POINTS + POST_TRIGGER_POINTS;
+    const uint16_t BuffSize = pa_config.Pre_Trigger_Points + pa_config.Pos_Trigger_Points;
 
     uint16_t *PulseData = (uint16_t *)malloc( sizeof(uint16_t) * BuffSize );
     
@@ -301,22 +375,29 @@ int main(int argc, char **argv)
     output_file = fopen("test.pad", "wb");
     
     pa_init();
-    pa_settings();
+    pa_settings( &pa_config );
 
-    struct pa_info_s pa_run_info;
-    pa_run_info.n_pulses = 0;
-    pa_run_info.t_errors = 0;
-    pa_run_info.e_time = 0;
+//     struct pa_info_s pa_run_info;
+//     pa_run_info.n_pulses = 0;
+//     pa_run_info.t_errors = 0;
+//     pa_run_info.e_time = 0;
     
-    pthread_t timer_t_id;
-    pthread_create(&timer_t_id, NULL, Timer, (void*)&pa_run_info);
+    
+    pa_flags.Running = true;
+    
+    pthread_t Timer_t_id, DisplayInfo_t_id;
+    pthread_create(&Timer_t_id, NULL, Timer, (void*)&pa_timer_data);
+//     pthread_create(&DisplayInfo_t_id, NULL, DisplayInfo, (void*)&pa_run_info);
+    pthread_create(&DisplayInfo_t_id, NULL, DisplayInfo, (void*)&pa_info);
     
     int c_error_count=0;
-    uint32_t rate = 0;
+//     uint32_t rate = 0;
     float avg_rate = 0;
-    uint32_t l_count = 0;
+//     uint32_t l_count = 0;
     
-    while( !stop )
+    
+//     while( !stop )
+    while( pa_flags.Running )
     {
         
         /* Enabling writting data into memory */
@@ -327,7 +408,8 @@ int main(int argc, char **argv)
          * new samples.
          */
         
-        usleep( MAX( (2*PRE_TRIGGER_POINTS*0.008), 1 ) );
+        //usleep( MAX( (2*PRE_TRIGGER_POINTS*0.008), 1 ) );
+        usleep( MAX( (2*pa_config.Pre_Trigger_Points*0.008), 1 ) );
 
         /* Set trigger source
          * By some unknow reason, trigger source MUST
@@ -361,7 +443,8 @@ int main(int argc, char **argv)
              * number of samples specifided in osc_SetTriggerDelay
              */
             
-            usleep( MAX( (2*POST_TRIGGER_POINTS*0.008), 1 ) );
+            //usleep( MAX( (2*POST_TRIGGER_POINTS*0.008), 1 ) );
+            usleep( MAX( (2*pa_config.Pos_Trigger_Points*0.008), 1 ) );
             
             /* After capturing all the samples specifided
              * in osc_SetTriggerDelay, memory write stops
@@ -374,10 +457,15 @@ int main(int argc, char **argv)
             uint32_t TriggerPoint, StartPoint;
             osc_GetWritePointerAtTrig( &TriggerPoint );
  
-            if( TriggerPoint >  PRE_TRIGGER_POINTS )
-                StartPoint = TriggerPoint - PRE_TRIGGER_POINTS ;
+//             if( TriggerPoint >  PRE_TRIGGER_POINTS )
+//                 StartPoint = TriggerPoint - PRE_TRIGGER_POINTS ;
+//             else
+//                 StartPoint = ADC_BUFFER_SIZE - PRE_TRIGGER_POINTS + TriggerPoint;
+
+            if( TriggerPoint >  pa_config.Pre_Trigger_Points )
+                StartPoint = TriggerPoint - pa_config.Pre_Trigger_Points ;
             else
-                StartPoint = ADC_BUFFER_SIZE - PRE_TRIGGER_POINTS + TriggerPoint;
+                StartPoint = ADC_BUFFER_SIZE - pa_config.Pre_Trigger_Points + TriggerPoint;
 
             const volatile uint32_t *buff = osc_GetDataBufferChA();
             
@@ -389,7 +477,8 @@ int main(int argc, char **argv)
  
             fflush(output_file);
             
-            pa_run_info.n_pulses++;
+//            pa_run_info.n_pulses++;
+            pa_info.n_pulses++;
         }
         else
         {
@@ -400,37 +489,43 @@ int main(int argc, char **argv)
              * aborted.
             */ 
         
-            pa_run_info.t_errors++;
+//            pa_run_info.t_errors++;
+            pa_info.t_errors++;
             c_error_count++;
             if(c_error_count == 5){
                 printf("\nReseting acquisition parameters:\n");
                 osc_WriteDataIntoMemory( false );
                 osc_ResetWriteStateMachine();
-                pa_settings();
+                pa_settings( &pa_config );
             }
             if(c_error_count == 10){
                 printf("Aborting...\n");
-                break;
+                    pa_flags.Running = false;
+//                 stop=1;
+//                 break;
             }
         }
-         if( ShowInfo && !stop ){
-             rate = pa_run_info.n_pulses - l_count;
-             l_count = pa_run_info.n_pulses;
-             printf("\r| Elapsed time:\t%7i s | Pulse count:\t%7i | Rate:\t\t%4i Hz | Trigger error count:\t%7i |", pa_run_info.e_time, pa_run_info.n_pulses, rate, pa_run_info.t_errors);
-             fflush(stdout);
-             ShowInfo = false;
-         }
+//          if( ShowInfo && !stop ){
+//              rate = pa_run_info.n_pulses - l_count;
+//              l_count = pa_run_info.n_pulses;
+//              printf("\r| Elapsed time:\t%7i s | Pulse count:\t%7i | Rate:\t\t%4i Hz | Trigger error count:\t%7i |", pa_run_info.e_time, pa_run_info.n_pulses, rate, pa_run_info.t_errors);
+//              fflush(stdout);
+//              ShowInfo = false;
+//          }
     }
     
     /* Releasing resources */
     pa_stop();
     fclose(output_file);
     free(PulseData);
-    pthread_join(timer_t_id, NULL);
-    avg_rate = (float) pa_run_info.n_pulses / (float)pa_run_info.e_time;
-    printf("\n|--------------------------------------- TOTALS ----------------------------------------|");
-    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i", pa_run_info.e_time, pa_run_info.n_pulses, avg_rate, pa_run_info.t_errors);
-    printf("\n|---------------------------------------------------------------------------------------|\n");
+    pthread_join(DisplayInfo_t_id, NULL);
+    pthread_join(Timer_t_id, NULL);
+//    avg_rate = (float) pa_run_info.n_pulses / (float)pa_run_info.e_time;
+    avg_rate = (float) pa_info.n_pulses / (float)pa_info.e_time;
+    printf("\n|---------------------------------- TOTALS -----------------------------------|");
+//     printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i", pa_run_info.e_time, pa_run_info.n_pulses, avg_rate, pa_run_info.t_errors);
+    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i", pa_info.e_time, pa_info.n_pulses, avg_rate, pa_info.t_errors);
+    printf("\n|-----------------------------------------------------------------------------|\n");
     return 0;
 }
 
