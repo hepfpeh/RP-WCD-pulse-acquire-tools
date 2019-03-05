@@ -8,6 +8,7 @@
 #include <time.h>
 #include <pthread.h>
 #include <string.h>
+#include <inttypes.h>
 #include "common.h"
 #include "oscilloscope.h"
 #include "ini.h"
@@ -49,7 +50,7 @@ volatile sig_atomic_t stop;
 
 typedef struct pa_info_s 
 {
-    uint32_t n_pulses;
+    uint64_t n_pulses;
     uint32_t t_errors;
     uint32_t e_time;
 } pa_info_t;
@@ -217,13 +218,13 @@ void *DisplayInfo( void *targs)
 {
     pa_info_t *pa_info = (pa_info_t*)targs;
     uint32_t rate = 0;
-    uint32_t l_count = 0;
+    uint64_t l_count = 0;
     sleep(1);
     while( pa_flags.Running )
     {
-        rate = pa_info->n_pulses - l_count;
+        rate = (uint16_t)(pa_info->n_pulses - l_count);
         l_count = pa_info->n_pulses;
-        printf("\r| ET:%7i s | PC:%7i | R:%5i Hz | TEC:%7i |", pa_info->e_time, pa_info->n_pulses, rate, pa_info->t_errors);
+        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | TEC:%7i |", pa_info->e_time, pa_info->n_pulses, rate, pa_info->t_errors);
         fflush(stdout);
         sleep(1);
     }
@@ -360,6 +361,9 @@ int main(int argc, char **argv)
     printf("\n|   %-25s%i", "Capture_Time_Secs:", pa_config.Capture_Time_Secs);
     printf("\n|   %-25s%s", "File_Prefix:", pa_config.File_Prefix);
     printf("\n|   %-25s%i", "File_Time_Secs:", pa_config.File_Time_Secs);
+    printf("\n|");
+    printf("\n| Press CTRL-C to stop");
+    printf("\n|");
     printf("\n|-----------------------------------------------------------------------------|\n");
     
     
