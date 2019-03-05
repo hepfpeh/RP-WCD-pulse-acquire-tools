@@ -57,8 +57,8 @@ typedef struct pa_info_s
 
 typedef struct pa_timer_data_s
 {
-    uint32_t *T_time; // Capture time
-    uint32_t *E_time; // Elapsed time
+    uint32_t *T_time; // Pointer to capture time
+    uint32_t *E_time; // Pointer to elapsed time
 } pa_timer_data_t;
 
 /* Program flags must be globals */
@@ -205,8 +205,9 @@ void *Timer( void *targs )
     {
         clock_nanosleep(CLOCK_REALTIME, 0, &OneSec, NULL);
         clock_gettime(CLOCK_REALTIME, &Current_clock);
-         *timer_data->E_time = Current_clock.tv_sec - Start_clock.tv_sec;
-        if( *timer_data->E_time > ( *timer_data->T_time - 1 ) ) pa_flags.Running = false;
+        *timer_data->E_time = Current_clock.tv_sec - Start_clock.tv_sec;
+        if( *timer_data->T_time > 0 )
+            if( *timer_data->E_time > ( *timer_data->T_time - 1 ) ) pa_flags.Running = false;
     }
 //     printf("\nTimer stopping\n");
 }
