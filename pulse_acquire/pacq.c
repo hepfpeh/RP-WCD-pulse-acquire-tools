@@ -53,6 +53,7 @@ typedef struct pa_info_s
     uint64_t n_pulses;
     uint32_t t_errors;
     uint32_t e_time;
+    uint32_t n_file;
 } pa_info_t;
 
 
@@ -61,6 +62,16 @@ typedef struct pa_timer_data_s
     uint32_t *T_time; // Pointer to capture time
     uint32_t *E_time; // Pointer to elapsed time
 } pa_timer_data_t;
+
+
+typedef struct pa_file_s
+{
+    FILE *Output_File;
+    uint32_t *e_time_ptr;
+    uint32_t *File_Time_Secs_ptr;
+    uint32_t *n_file_ptr;
+    char *File_Prefix_ptr;
+} pa_file_t;
 
 /* Program flags must be globals */
 // This must be of type `volatile` to prevent
@@ -224,14 +235,14 @@ void *DisplayInfo( void *targs)
     {
         rate = (uint16_t)(pa_info->n_pulses - l_count);
         l_count = pa_info->n_pulses;
-        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | TEC:%7i |", pa_info->e_time, pa_info->n_pulses, rate, pa_info->t_errors);
+        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | TEC:%7i | FN:%7i |", pa_info->e_time, pa_info->n_pulses, rate, pa_info->t_errors, pa_info->n_file);
         fflush(stdout);
         sleep(1);
     }
 }
 
 
-int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *info, pa_timer_data_t *timer_data)
+int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *info, pa_timer_data_t *timer_data, pa_file_t *file )
 {
     config->Pre_Trigger_Points = 5;
     config->Pos_Trigger_Points = 27;
@@ -247,9 +258,16 @@ int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *
     info->n_pulses = 0;
     info->t_errors = 0;
     info->e_time   = 0;
+    info->n_file   = 0;
     
     timer_data->T_time = &config->Capture_Time_Secs;
     timer_data->E_time = &info->e_time;
+    
+    file->Output_File        = NULL;
+    file->e_time_ptr         = &info->e_time;
+    file->File_Time_Secs_ptr = &config->File_Time_Secs;
+    file->File_Prefix_ptr    = config->File_Prefix;
+    file->n_file_ptr         = &info->n_file;
 
     return 0;
 }
@@ -317,7 +335,73 @@ int pa_settings( pa_config_t *config )
     return 0;
 }
 
+int pa_FileName( pa_file_t *file )
+{
+    if( (file->Output_File) == NULL )
+    {
+        char DateTime[15];
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        strftime(DateTime, sizeof(DateTime)-1, "%d%m%y-%H%M%S", t);
+//      printf("Current Date: %s\n", DateTime);
+    
+        char FileName[40];
+        strcpy(FileName, file->File_Prefix_ptr);
+        strcat(FileName, "-");
+        strcat(FileName, DateTime);
+        strcat(FileName, ".pad");
+        printf("FileName: %s\n", FileName);
+    
+        file->Output_File = fopen(FileName, "wb");
+        
+        if( (file->Output_File) == NULL )
+        {
+            printf("\nError: Can't open file for output\n");
+            exit(0);
+        }
+        
+        (*file->n_file_ptr)++;
+        
+    } else if( *file->e_time_ptr > (*file->n_file_ptr)*(*file->File_Time_Secs_ptr) )
+    {
+        fflush( file->Output_File );
+        fclose( file->Output_File );
+        
+        char DateTime[15];
+        time_t now = time(NULL);
+        struct tm *t = localtime(&now);
+        strftime(DateTime, sizeof(DateTime)-1, "%d%m%y-%H%M%S", t);
+//      printf("Current Date: %s\n", DateTime);
+    
+        char FileName[40];
+        strcpy(FileName, file->File_Prefix_ptr);
+        strcat(FileName, "-");
+        strcat(FileName, DateTime);
+        strcat(FileName, ".pad");
+        printf("FileName: %s\n", FileName);
+    
+        file->Output_File = fopen(FileName, "wb");
+        
+        if( (file->Output_File) == NULL )
+        {
+            printf("\nError: Can't open file for output\n");
+            exit(0);
+        }
+        
+        (*file->n_file_ptr)++;
+        
+    }
+    
+    return 0;
+}
 
+int pa_CloseFile( pa_file_t *file )
+{
+    fflush( file->Output_File );
+    fclose( file->Output_File );
+    
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
@@ -329,10 +413,11 @@ int main(int argc, char **argv)
     pa_config_t     pa_config;
     pa_info_t       pa_info;
     pa_timer_data_t pa_timer_data;
+    pa_file_t       pa_file;
     
 //     printf("Pointers (1): %i %i\n", &pa_config.Capture_Time_Secs, &pa_info.e_time );
     
-    pa_SetDefaults( &pa_config, &pa_flags, &pa_info, &pa_timer_data );
+    pa_SetDefaults( &pa_config, &pa_flags, &pa_info, &pa_timer_data, &pa_file );
     
     
 //     printf("Pointers (2): %i %i\n", pa_timer_data.T_time, pa_timer_data.E_time );
@@ -367,6 +452,8 @@ int main(int argc, char **argv)
     printf("\n|-----------------------------------------------------------------------------|\n");
     
     
+//    pa_FileName( &pa_file );
+    
 //    return 0;
     
     signal(SIGINT, inthand);
@@ -376,8 +463,8 @@ int main(int argc, char **argv)
 
     uint16_t *PulseData = (uint16_t *)malloc( sizeof(uint16_t) * BuffSize );
     
-    FILE *output_file;
-    output_file = fopen("test.pad", "wb");
+//     FILE *output_file;
+//     output_file = fopen("test.pad", "wb");
     
     pa_init();
     pa_settings( &pa_config );
@@ -478,9 +565,15 @@ int main(int argc, char **argv)
                 PulseData[i] = ( buff[(StartPoint + i) % ADC_BUFFER_SIZE] ) & ADC_BITS_MAK;
             }
         
-            fwrite(PulseData, sizeof(uint16_t), BuffSize, output_file);
+//             fwrite(PulseData, sizeof(uint16_t), BuffSize, output_file);
+//  
+//             fflush(output_file);
+
+            pa_FileName( &pa_file );
+            
+            fwrite(PulseData, sizeof(uint16_t), BuffSize, pa_file.Output_File );
  
-            fflush(output_file);
+            fflush( pa_file.Output_File );
             
 //            pa_run_info.n_pulses++;
             pa_info.n_pulses++;
@@ -521,7 +614,8 @@ int main(int argc, char **argv)
     
     /* Releasing resources */
     pa_stop();
-    fclose(output_file);
+//     fclose(output_file);
+    pa_CloseFile( &pa_file );
     free(PulseData);
     pthread_join(DisplayInfo_t_id, NULL);
     pthread_join(Timer_t_id, NULL);
@@ -529,7 +623,7 @@ int main(int argc, char **argv)
     avg_rate = (float) pa_info.n_pulses / (float)pa_info.e_time;
     printf("\n|---------------------------------- TOTALS -----------------------------------|");
 //     printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i", pa_run_info.e_time, pa_run_info.n_pulses, avg_rate, pa_run_info.t_errors);
-    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i", pa_info.e_time, pa_info.n_pulses, avg_rate, pa_info.t_errors);
+    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i\n| Files writed:\t\t%7i", pa_info.e_time, pa_info.n_pulses, avg_rate, pa_info.t_errors, pa_info.n_file);
     printf("\n|-----------------------------------------------------------------------------|\n");
     return 0;
 }
