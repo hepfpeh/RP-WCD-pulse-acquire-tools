@@ -12,6 +12,8 @@
 #include "common.h"
 #include "oscilloscope.h"
 #include "ini.h"
+#include "version.h"
+#include "build.h"
 
 /* configuration file */
 
