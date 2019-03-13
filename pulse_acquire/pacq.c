@@ -356,7 +356,7 @@ int pa_InitFile( pa_file_t *file )
             exit(0);
         }
         
-        fseek( file->Output_File, 256, SEEK_SET);
+        fseek( file->Output_File, 640, SEEK_SET);
         
         file->cf_pulses = 0;
         
@@ -371,32 +371,54 @@ int pa_CloseFile( pa_file_t *file )
 {
     if( (file->Output_File) != NULL )
     {
+        /*
+         * Structure for PAA file
+         * 
+         * Offset | Size in bytes | Descrtiption
+         * --------------------------------------
+         * 0      | 8             | File identifier: Must be 'PAA 00\n' (with end line \n)
+         * --------------------------------------
+         * 8      | 512           | Text headers: Program description, version, build, comentaries, etc
+         *        |               | in text format.
+         * --------------------------------------
+         * 520    | 4             | Endianness check number: Is an unsinged int of 32 bit with value 0x10203040
+         *---------------------------------------
+         * 524    | 4             | Number of points per pulse (PS).  Unsinged int of 32 bit.
+         *---------------------------------------
+         * 528    | 4             | Number of pulses in recorded in this file (PC). Unsinged int of 32 bit.
+         * --------------------------------------
+         * 532    | 4             | Threshold level used to trigger as specified in config file. Singed int of 32 bit.
+         * --------------------------------------
+         * 640    | 2*PS*PC       | Pulse data.
+         * 
+         */
+        
         char itDateTime[30];
         struct tm *it = localtime(&file->i_time);
         strftime(itDateTime, sizeof(itDateTime)-1, "%c %Z", it);
         
         fseek( file->Output_File, 0, SEEK_SET);
         
-        fprintf(file->Output_File, "PAA 00\n");                 //   7 bytes
-        uint32_t eci = 0x00010203;
-        fwrite(&eci, sizeof(uint32_t), 1, file->Output_File );  //   4 bytes
-                                                                //----------
-                                                                //  11 bytes (max. 15)
+        fprintf(file->Output_File, "PAA 00\n");                                            //   7 bytes
+                                                                
         
-        fseek( file->Output_File, 16, SEEK_SET);
+        fseek( file->Output_File, 8, SEEK_SET);
         
-        fprintf(file->Output_File, "Pulse Acquire tool for Red Pitaya\n"); //  34 bytes
-        fprintf(file->Output_File, "Version: %1.2f\n", 0.0);               //  14 bytes
-        fprintf(file->Output_File, "%s\n",itDateTime);                     //  29 bytes
-        fprintf(file->Output_File, "%s\n",file->File_Header_Comment_ptr);  // 129 bytes
-                                                                           //-----------
-                                                                           // 206 bytes (max 207)
-        fseek( file->Output_File, 224, SEEK_SET);
+        fprintf(file->Output_File, "Pulse Acquire tool for Red Pitaya\n");                //  34 bytes
+        fprintf(file->Output_File, "Version: %d.%d.%d\n", _VERSION_MAJOR, _VERSION_MINOR, _VERSION_PATCH);
+                                                                                          //  19 bytes
+        fprintf(file->Output_File, "Build: %s\n", _BUILD);
+                                                                                          // 128 bytes
+        fprintf(file->Output_File, "%s\n",itDateTime);                                    //  29 bytes
+        fprintf(file->Output_File, "%s\n",file->File_Header_Comment_ptr);                 // 129 bytes
+                                                                                          
+        fseek( file->Output_File, 520, SEEK_SET);
         
-        fwrite(&file->p_size, sizeof(uint32_t), 1, file->Output_File );    //  4 bytes
-        fwrite(&file->cf_pulses, sizeof(uint32_t), 1, file->Output_File ); //  4 bytes
-                                                                           //----------
-                                                                           //  8 bytes (max 31)
+        uint32_t eci = 0x10203040;
+        fwrite(&eci, sizeof(uint32_t), 1, file->Output_File );                           //    4 bytes
+        fwrite(&file->p_size, sizeof(uint32_t), 1, file->Output_File );                  //    4 bytes
+        fwrite(&file->cf_pulses, sizeof(uint32_t), 1, file->Output_File );               //    4 bytes
+                                                                           
         fflush( file->Output_File );
         fclose( file->Output_File );
         

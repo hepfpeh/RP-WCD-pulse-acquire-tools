@@ -17,10 +17,11 @@ project (Pulse_Acquire)
 include_directories(${PROJECT_SOURCE_DIR}/include)
 
 set(BUILD_SCRIPT ${PROJECT_BINARY_DIR}/bgen.sh)
-set(rp_pa_build_h ${PROJECT_BINARY_DIR}/build.h)
+#set(rp_pa_build_h ${PROJECT_BINARY_DIR}/build.h)
 
 file(GLOB rp_pa_sources ${PROJECT_SOURCE_DIR}/src/*.c)
 file(GLOB rp_pa_headers ${PROJECT_SOURCE_DIR}/include/*.h)
+#file(GLOB rp_pa_build_h ${PROJECT_BINARY_DIR}/build.h)
 
 add_custom_target(generate_build
     COMMAND ${BUILD_SCRIPT}
@@ -28,19 +29,29 @@ add_custom_target(generate_build
     VERBATIM
     )
 
-add_executable(pacq pacq.c ${rp_pa_sources} ${rp_pa_headers} ${rp_pa_build_h})
+add_executable(pacq pacq.c ${rp_pa_sources} ${rp_pa_headers} ${PROJECT_BINARY_DIR}/build.h)
 add_dependencies(pacq generate_build)
 target_link_libraries(pacq -lm -lpthread )
 
-set(PACQ_SCRIPTS
-    bgen.sh
-    build.h
-  )
+#set(PACQ_SCRIPTS
+#    bgen.sh
+#    build.h
+#  )
 
-foreach(_script ${PACQ_SCRIPTS})
-  configure_file(
-    ${PROJECT_SOURCE_DIR}/${_script}
-    ${PROJECT_BINARY_DIR}/${_script}
+#foreach(_script ${PACQ_SCRIPTS})
+#  configure_file(
+#    ${PROJECT_SOURCE_DIR}/${_script}
+#    ${PROJECT_BINARY_DIR}/${_script}
+#    COPYONLY
+#    )
+#endforeach()
+
+configure_file( ${PROJECT_SOURCE_DIR}/bgen.sh
+                ${PROJECT_BINARY_DIR}/bgen.sh
     COPYONLY
-    )
-endforeach()
+)
+
+configure_file( ${PROJECT_SOURCE_DIR}/build_h
+                ${PROJECT_BINARY_DIR}/build.h
+    COPYONLY
+)
