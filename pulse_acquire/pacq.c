@@ -79,6 +79,12 @@ typedef struct pa_data_file_s
     const int32_t  *Trigger_Level_ptr;
 } pa_data_file_t;
 
+typedef struct pa_log_file_s
+{
+    FILE *Log_File;
+    const char     *File_Name_Prefix_ptr;
+} pa_log_file_t;
+
 /* Program flags must be globals */
 // This must be of type `volatile` to prevent
 // the compiler from optimizing away the
@@ -423,7 +429,7 @@ int pa_CloseDataFile( pa_data_file_t *file )
         fwrite(&eci, sizeof(uint32_t), 1, file->Output_File );                           //    4 bytes
         fwrite(&file->p_size, sizeof(uint32_t), 1, file->Output_File );                  //    4 bytes
         fwrite(&file->cf_pulses, sizeof(uint32_t), 1, file->Output_File );               //    4 bytes
-        fwrite(file->Trigger_Level_ptr, sizeof(int32_t), 1, file->Output_File );        //    4 bytes
+        fwrite(file->Trigger_Level_ptr, sizeof(int32_t), 1, file->Output_File );         //    4 bytes
                                                                            
         fflush( file->Output_File );
         fclose( file->Output_File );
@@ -446,6 +452,51 @@ int pa_GetFileName( pa_data_file_t *file )
     return 0;
 }
 
+int pa_InitLogFile( pa_log_file_t *file )
+{
+    if( (file->Log_File) == NULL )
+    {
+     
+        char FileName[40];
+        strcpy(FileName, file->File_Name_Prefix_ptr);
+        strcat(FileName, ".log");
+    
+        file->Log_File = fopen(FileName, "w");
+        
+        if( (file->Log_File) == NULL )
+        {
+            printf("\nError: Can't open file for output\n");
+            exit(0);
+        }
+    }
+    return 0;
+}
+
+int pa_LogFileEntry( pa_log_file_t *file, const char *Entry )
+{
+    if( (file->Log_File) != NULL )
+    {
+        char DateTime[15];
+        time_t tnow = time(NULL);
+        struct tm *t = localtime(&tnow);
+        strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S", t);
+        
+        fprintf( file->Log_File , "%s %s\n", DateTime, Entry );
+        fflush( file->Log_File );
+    }
+    return 0;
+}
+        
+
+int pa_CloseLogFile( pa_log_file_t *file )
+{
+    if( (file->Log_File) != NULL )
+    {
+        fflush( file->Log_File );
+        fclose( file->Log_File );
+    }
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
@@ -457,7 +508,7 @@ int main(int argc, char **argv)
     pa_config_t     pa_config;
     pa_run_info_t   pa_run_info;
     pa_timer_data_t pa_timer_data;
-    pa_data_file_t       pa_data_file;
+    pa_data_file_t  pa_data_file;
     
     
     pa_SetDefaults( &pa_config, &pa_flags, &pa_run_info, &pa_timer_data, &pa_data_file );
