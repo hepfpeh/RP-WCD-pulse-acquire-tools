@@ -14,7 +14,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 project (Pulse_Acquire)
 
-include_directories(${PROJECT_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/include ${PROJECT_BINARY_DIR})
 
 set(BUILD_SCRIPT ${PROJECT_BINARY_DIR}/bgen.sh)
 #set(rp_pa_build_h ${PROJECT_BINARY_DIR}/build.h)

@@ -52,13 +52,13 @@ typedef struct pa_flags_s
 
 
 
-typedef struct pa_info_s 
+typedef struct pa_run_info_s 
 {
     uint64_t n_pulses;
     uint32_t t_errors;
     uint32_t e_time;
     uint32_t n_file;
-} pa_info_t;
+} pa_run_info_t;
 
 
 typedef struct pa_timer_data_s
@@ -76,6 +76,7 @@ typedef struct pa_file_s
     uint32_t *n_file_ptr;
     char     *File_Name_Prefix_ptr;
     char     *File_Header_Comment_ptr;
+    int32_t  *Trigger_Level_ptr;
     time_t   i_time;
     uint32_t p_size;
     uint32_t cf_pulses;
@@ -218,24 +219,26 @@ void *Timer( void *targs )
 }
 
 
-void *DisplayInfo( void *targs)
+void *pa_DisplayInfo( void *targs)
 {
-    pa_info_t *pa_info = (pa_info_t*)targs;
+    pa_run_info_t *pa_run_info = (pa_run_info_t*)targs;
+    
     uint32_t rate = 0;
     uint64_t l_count = 0;
     sleep(1);
     while( pa_flags.Running )
     {
-        rate = (uint16_t)(pa_info->n_pulses - l_count);
-        l_count = pa_info->n_pulses;
-        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | TEC:%7i | FN:%7i |", pa_info->e_time, pa_info->n_pulses, rate, pa_info->t_errors, pa_info->n_file);
+        rate = (uint16_t)(pa_run_info->n_pulses - l_count);
+        l_count = pa_run_info->n_pulses;
+        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | TEC:%7i | FN:%7i |", pa_run_info->e_time, pa_run_info->n_pulses, rate, pa_run_info->t_errors, pa_run_info->n_file);
         fflush(stdout);
         sleep(1);
     }
+    
 }
 
 
-int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *info, pa_timer_data_t *timer_data, pa_file_t *file )
+int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_run_info_t *info, pa_timer_data_t *timer_data, pa_file_t *file )
 {
     config->Pre_Trigger_Points   = 5;
     config->Pos_Trigger_Points   = 27;
@@ -264,6 +267,7 @@ int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_info_t *
     file->File_Name_Prefix_ptr       = config->File_Name_Prefix;
     file->File_Header_Comment_ptr    = config->File_Header_Comment;
     file->n_file_ptr         = &info->n_file;
+    file->Trigger_Level_ptr  = &config->Trigger_Level;
     file->i_time             = 0;
     file->p_size             = 0;
     file->cf_pulses          = 0;
@@ -333,7 +337,7 @@ int pa_settings( pa_config_t *config )
 }
 
 
-int pa_InitFile( pa_file_t *file )
+int pa_InitDataFile( pa_file_t *file )
 {
     if( (file->Output_File) == NULL )
     {
@@ -367,7 +371,7 @@ int pa_InitFile( pa_file_t *file )
     return 0;
 }
 
-int pa_CloseFile( pa_file_t *file )
+int pa_CloseDataFile( pa_file_t *file )
 {
     if( (file->Output_File) != NULL )
     {
@@ -376,10 +380,16 @@ int pa_CloseFile( pa_file_t *file )
          * 
          * Offset | Size in bytes | Descrtiption
          * --------------------------------------
-         * 0      | 8             | File identifier: Must be 'PAA 00\n' (with end line \n)
+         * 0      | 8             | File identifier: Must be 'PAA 01\n' (with end line \n) 
+         *        |               | for this file structure.
+         *        |               | Change if the file structure is modified.
          * --------------------------------------
-         * 8      | 512           | Text headers: Program description, version, build, comentaries, etc
-         *        |               | in text format.
+         * 8      | 512           | Text headers: 5 lines
+         *        |               | - Program description
+         *        |               | - version
+         *        |               | - build
+         *        |               | - date of file creation
+         *        |               | - comentaries form config file.
          * --------------------------------------
          * 520    | 4             | Endianness check number: Is an unsinged int of 32 bit with value 0x10203040
          *---------------------------------------
@@ -399,7 +409,7 @@ int pa_CloseFile( pa_file_t *file )
         
         fseek( file->Output_File, 0, SEEK_SET);
         
-        fprintf(file->Output_File, "PAA 00\n");                                            //   7 bytes
+        fprintf(file->Output_File, "PAA 01\n");                                            //   7 bytes
                                                                 
         
         fseek( file->Output_File, 8, SEEK_SET);
@@ -418,6 +428,7 @@ int pa_CloseFile( pa_file_t *file )
         fwrite(&eci, sizeof(uint32_t), 1, file->Output_File );                           //    4 bytes
         fwrite(&file->p_size, sizeof(uint32_t), 1, file->Output_File );                  //    4 bytes
         fwrite(&file->cf_pulses, sizeof(uint32_t), 1, file->Output_File );               //    4 bytes
+        fwrite(file->Trigger_Level_ptr, sizeof(int32_t), 1, file->Output_File );        //    4 bytes
                                                                            
         fflush( file->Output_File );
         fclose( file->Output_File );
@@ -433,8 +444,8 @@ int pa_GetFileName( pa_file_t *file )
 {
     if( *file->e_time_ptr > (*file->n_file_ptr)*(*file->File_Time_Secs_ptr) )
     {
-        pa_CloseFile( file );
-        pa_InitFile( file );
+        pa_CloseDataFile( file );
+        pa_InitDataFile( file );
     }
     
     return 0;
@@ -449,12 +460,12 @@ int main(int argc, char **argv)
     }
     
     pa_config_t     pa_config;
-    pa_info_t       pa_info;
+    pa_run_info_t   pa_run_info;
     pa_timer_data_t pa_timer_data;
     pa_file_t       pa_file;
     
     
-    pa_SetDefaults( &pa_config, &pa_flags, &pa_info, &pa_timer_data, &pa_file );
+    pa_SetDefaults( &pa_config, &pa_flags, &pa_run_info, &pa_timer_data, &pa_file );
     
     
 
@@ -509,9 +520,9 @@ int main(int argc, char **argv)
     
     pa_flags.Running = true;
     
-    pthread_t Timer_t_id, DisplayInfo_t_id;
+    pthread_t Timer_t_id, pa_DisplayInfo_t_id;
     pthread_create(&Timer_t_id, NULL, Timer, (void*)&pa_timer_data);
-    pthread_create(&DisplayInfo_t_id, NULL, DisplayInfo, (void*)&pa_info);
+    pthread_create(&pa_DisplayInfo_t_id, NULL, pa_DisplayInfo, (void*)&pa_run_info);
     
     int c_error_count=0;
     float avg_rate = 0;
@@ -520,7 +531,7 @@ int main(int argc, char **argv)
     struct timespec LTClock, EClock;
     clock_gettime(CLOCK_REALTIME, &LTClock);
     
-    pa_InitFile( &pa_file );
+    pa_InitDataFile( &pa_file );
     
 //     while( !stop )
     while( pa_flags.Running )
@@ -603,7 +614,7 @@ int main(int argc, char **argv)
             
             pa_file.cf_pulses++;
             
-            pa_info.n_pulses++;
+            pa_run_info.n_pulses++;
             
             clock_gettime(CLOCK_REALTIME, &LTClock);
         }
@@ -616,7 +627,7 @@ int main(int argc, char **argv)
              * aborted.
             */ 
         
-            pa_info.t_errors++;
+            pa_run_info.t_errors++;
             c_error_count++;
             if( (c_error_count % 35) == 0 ){
                 clock_gettime(CLOCK_REALTIME, &EClock);
@@ -633,13 +644,13 @@ int main(int argc, char **argv)
     
     /* Releasing resources */
     pa_stop();
-    pa_CloseFile( &pa_file );
+    pa_CloseDataFile( &pa_file );
     free(PulseData);
-    pthread_join(DisplayInfo_t_id, NULL);
+    pthread_join(pa_DisplayInfo_t_id, NULL);
     pthread_join(Timer_t_id, NULL);
-    avg_rate = (float) pa_info.n_pulses / (float)pa_info.e_time;
+    avg_rate = (float) pa_run_info.n_pulses / (float)pa_run_info.e_time;
     printf("\n|---------------------------------- TOTALS -----------------------------------|");
-    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i\n| Files writed:\t\t%7i", pa_info.e_time, pa_info.n_pulses, avg_rate, pa_info.t_errors, pa_info.n_file);
+    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i\n| Files writed:\t\t%7i", pa_run_info.e_time, pa_run_info.n_pulses, avg_rate, pa_run_info.t_errors, pa_run_info.n_file);
     printf("\n|-----------------------------------------------------------------------------|\n");
     return 0;
 }
