@@ -68,6 +68,7 @@ typedef struct pa_timer_data_s
 typedef struct pa_data_file_s
 {
     FILE *Output_File;
+    char Output_File_Name[128];
     uint32_t File_Number;
     time_t   i_time;
     uint32_t p_size;
@@ -87,8 +88,8 @@ typedef struct pa_log_file_s
 
 typedef struct pa_logger_s
 {
-    pa_run_info_t *Run_Info_ptr;
-    pa_log_file_t *Log_File_ptr;
+    const pa_run_info_t *Run_Info_ptr;
+    const pa_log_file_t *Log_File_ptr;
 } pa_logger_t;
 
 /* Program flags must be globals */
@@ -205,9 +206,10 @@ void inthand(int signum)
    pa_flags.Running = false;
 }
 
+
 // timer
 
-void *Timer( void *targs )
+void *pa_Timer_thr( void *targs )
 {
     pa_timer_data_t *timer_data = (pa_timer_data_t*)targs;
     struct timespec OneSec, Start_clock, Current_clock;
@@ -225,7 +227,7 @@ void *Timer( void *targs )
 }
 
 
-void *pa_DisplayInfo( void *targs)
+void *pa_DisplayInfo_thr( void *targs )
 {
     pa_run_info_t *pa_run_info = (pa_run_info_t*)targs;
     
@@ -236,15 +238,51 @@ void *pa_DisplayInfo( void *targs)
     {
         rate = (uint16_t)(pa_run_info->n_pulses - l_count);
         l_count = pa_run_info->n_pulses;
-        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | TEC:%7i | FN:%7i |", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, rate, pa_run_info->t_errors, *pa_run_info->File_Number_ptr);
+        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | FN:%7i |", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, rate, *pa_run_info->File_Number_ptr);
         fflush(stdout);
         sleep(1);
     }
     
 }
 
+void *pa_Logger_thr( void *targs )
+{
+    pa_logger_t *pa_logger = (pa_logger_t*)targs;
+    
+    if( pa_logger->Log_File_ptr->Log_File == NULL )
+    {
+        printf("Error: Log file not initialized");
+        exit(0);
+    }
+    
+    
+    char DateTime[20];
+    time_t tnow;
+    float rate = 0.0;
+    uint64_t l_count = 0;
+    int counter = 0;
+    sleep(1);
 
-int pa_InitVars( pa_config_t *config, pa_run_info_t *info, pa_timer_data_t *timer_data, pa_log_file_t *log_file, pa_data_file_t *data_file )
+    while( pa_flags.Running )
+    {
+        counter++;
+        if(counter == 60)
+        {
+            counter = 0;
+            tnow = time(NULL);
+            struct tm *t = localtime(&tnow);
+            strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S", t);
+            
+            rate = (float)(pa_logger->Run_Info_ptr->n_pulses - l_count)/60.0;
+            l_count = pa_logger->Run_Info_ptr->n_pulses;
+            fprintf(pa_logger->Log_File_ptr->Log_File,"M %s %11" PRIu64 " %5.2f\n",  DateTime, pa_logger->Run_Info_ptr->n_pulses, rate);
+            fflush(pa_logger->Log_File_ptr->Log_File);
+        }
+        sleep(1);
+    }
+}
+
+int pa_InitVars( pa_config_t *config, pa_run_info_t *info, pa_timer_data_t *timer_data, pa_log_file_t *log_file, pa_data_file_t *data_file, pa_logger_t *logger )
 {
     
     strcpy( config->Config_File_Name,   "none.conf");
@@ -270,6 +308,7 @@ int pa_InitVars( pa_config_t *config, pa_run_info_t *info, pa_timer_data_t *time
     log_file->File_Name_Prefix_ptr      = config->File_Name_Prefix;
     
     data_file->Output_File              = NULL;
+    strcpy( data_file->Output_File_Name,"none.paa");
     data_file->File_Number              = 0;
     data_file->i_time                   = 0;
     data_file->p_size                   = 0;
@@ -279,6 +318,9 @@ int pa_InitVars( pa_config_t *config, pa_run_info_t *info, pa_timer_data_t *time
     data_file->File_Name_Prefix_ptr     = config->File_Name_Prefix;
     data_file->File_Header_Comment_ptr  = config->File_Header_Comment;
     data_file->Trigger_Level_ptr        = &config->Trigger_Level;
+    
+    logger->Run_Info_ptr                = info;
+    logger->Log_File_ptr                = log_file;
     
 
     return 0;
@@ -292,7 +334,6 @@ int pa_CheckConfig( pa_config_t *config )
     }
     return 0;
 }
-
 
 int pa_InitRP()
 {
@@ -345,6 +386,65 @@ int pa_SettingsRP( pa_config_t *config )
     return 0;
 }
 
+int pa_LogFileEntry( pa_log_file_t *file, const char *Entry )
+{
+    if( (file->Log_File) != NULL )
+    {
+        char DateTime[20];
+        time_t tnow = time(NULL);
+        struct tm *t = localtime(&tnow);
+        strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S", t);
+        
+        fprintf( file->Log_File , "I %s %s\n", DateTime, Entry );
+        fflush( file->Log_File );
+    }
+    return 0;
+}
+
+int pa_InitLogFile( pa_log_file_t *file )
+{
+    if( (file->Log_File) == NULL )
+    {
+     
+        char FileName[40];
+        strcpy(FileName, file->File_Name_Prefix_ptr);
+        strcat(FileName, "-run.log");
+    
+        file->Log_File = fopen(FileName, "w");
+        
+        if( (file->Log_File) == NULL )
+        {
+            printf("\nError: Can't open file for output\n");
+            exit(0);
+        }
+        
+        pa_LogFileEntry( file, "Log file started");
+        
+        char TZ[20];
+        time_t tnow = time(NULL);
+        struct tm *t = localtime(&tnow);
+        strftime(TZ, sizeof(TZ)-1, "%Z", t);
+        
+        char log_entry[200];
+        sprintf(log_entry, "Time Zone is %s", TZ);
+        pa_LogFileEntry( file, log_entry );
+    }
+    return 0;
+}
+
+
+int pa_CloseLogFile( pa_log_file_t *file )
+{
+    if( (file->Log_File) != NULL )
+    {
+        pa_LogFileEntry(file, "Log file stopped" );
+        
+        fflush( file->Log_File );
+        fclose( file->Log_File );
+    }
+    return 0;
+}
+
 
 int pa_InitDataFile( pa_data_file_t *file )
 {
@@ -375,14 +475,17 @@ int pa_InitDataFile( pa_data_file_t *file )
         
         file->File_Number++;
         
+        
+        strcpy( file->Output_File_Name, FileName);
+        
     }
     
     return 0;
 }
 
-int pa_CloseDataFile( pa_data_file_t *file )
+int pa_CloseDataFile( pa_data_file_t *data_file, pa_log_file_t *log_file )
 {
-    if( (file->Output_File) != NULL )
+    if( (data_file->Output_File) != NULL )
     {
         /*
          * Structure for PAA file
@@ -413,100 +516,54 @@ int pa_CloseDataFile( pa_data_file_t *file )
          */
         
         char itDateTime[30];
-        struct tm *it = localtime(&file->i_time);
+        struct tm *it = localtime(&data_file->i_time);
         strftime(itDateTime, sizeof(itDateTime)-1, "%c %Z", it);
         
-        fseek( file->Output_File, 0, SEEK_SET);
+        fseek( data_file->Output_File, 0, SEEK_SET);
         
-        fprintf(file->Output_File, "PAA 01\n");                                            //   7 bytes
+        fprintf(data_file->Output_File, "PAA 01\n");                                            //   7 bytes
                                                                 
         
-        fseek( file->Output_File, 8, SEEK_SET);
+        fseek( data_file->Output_File, 8, SEEK_SET);
         
-        fprintf(file->Output_File, "Pulse Acquire tool for Red Pitaya\n");                //  34 bytes
-        fprintf(file->Output_File, "Version: %d.%d.%d\n", _VERSION_MAJOR, _VERSION_MINOR, _VERSION_PATCH);
-                                                                                          //  19 bytes
-        fprintf(file->Output_File, "Build: %s\n", _BUILD);
-                                                                                          // 128 bytes
-        fprintf(file->Output_File, "%s\n",itDateTime);                                    //  29 bytes
-        fprintf(file->Output_File, "%s\n",file->File_Header_Comment_ptr);                 // 129 bytes
+        fprintf(data_file->Output_File, "Pulse Acquire tool for Red Pitaya\n");                //  34 bytes
+        fprintf(data_file->Output_File, "Version: %d.%d.%d\n", _VERSION_MAJOR, _VERSION_MINOR, _VERSION_PATCH);
+                                                                                               //  19 bytes
+        fprintf(data_file->Output_File, "Build: %s\n", _BUILD);
+                                                                                               // 128 bytes
+        fprintf(data_file->Output_File, "%s\n",itDateTime);                                    //  29 bytes
+        fprintf(data_file->Output_File, "%s\n",data_file->File_Header_Comment_ptr);            // 129 bytes
                                                                                           
-        fseek( file->Output_File, 520, SEEK_SET);
+        fseek( data_file->Output_File, 520, SEEK_SET);
         
         uint32_t eci = 0x10203040;
-        fwrite(&eci, sizeof(uint32_t), 1, file->Output_File );                           //    4 bytes
-        fwrite(&file->p_size, sizeof(uint32_t), 1, file->Output_File );                  //    4 bytes
-        fwrite(&file->cf_pulses, sizeof(uint32_t), 1, file->Output_File );               //    4 bytes
-        fwrite(file->Trigger_Level_ptr, sizeof(int32_t), 1, file->Output_File );         //    4 bytes
+        fwrite(&eci, sizeof(uint32_t), 1, data_file->Output_File );                           //    4 bytes
+        fwrite(&data_file->p_size, sizeof(uint32_t), 1, data_file->Output_File );             //    4 bytes
+        fwrite(&data_file->cf_pulses, sizeof(uint32_t), 1, data_file->Output_File );          //    4 bytes
+        fwrite(data_file->Trigger_Level_ptr, sizeof(int32_t), 1, data_file->Output_File );    //    4 bytes
                                                                            
-        fflush( file->Output_File );
-        fclose( file->Output_File );
+        fflush( data_file->Output_File );
+        fclose( data_file->Output_File );
         
-        file->Output_File = NULL;
+        data_file->Output_File = NULL;
+        
+        char log_entry[200];
+        sprintf(log_entry, "File %s writted with %d pulses", data_file->Output_File_Name, data_file->cf_pulses);
+        pa_LogFileEntry( log_file, log_entry );
     }
     
     return 0;
 }
 
 
-int pa_GetFileName( pa_data_file_t *file )
+int pa_GetFileName( pa_data_file_t *data_file, pa_log_file_t *log_file )
 {
-    if( *file->Elapsed_Time_ptr > (file->File_Number)*(*file->File_Time_Secs_ptr) )
+    if( *data_file->Elapsed_Time_ptr > (data_file->File_Number)*(*data_file->File_Time_Secs_ptr) )
     {
-        pa_CloseDataFile( file );
-        pa_InitDataFile( file );
+        pa_CloseDataFile( data_file, log_file );
+        pa_InitDataFile( data_file );
     }
     
-    return 0;
-}
-
-int pa_LogFileEntry( pa_log_file_t *file, const char *Entry )
-{
-    if( (file->Log_File) != NULL )
-    {
-        char DateTime[20];
-        time_t tnow = time(NULL);
-        struct tm *t = localtime(&tnow);
-        strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S %Z", t);
-        
-        fprintf( file->Log_File , "I %s %s\n", DateTime, Entry );
-        fflush( file->Log_File );
-    }
-    return 0;
-}
-
-int pa_InitLogFile( pa_log_file_t *file )
-{
-    if( (file->Log_File) == NULL )
-    {
-     
-        char FileName[40];
-        strcpy(FileName, file->File_Name_Prefix_ptr);
-        strcat(FileName, "-run.log");
-    
-        file->Log_File = fopen(FileName, "w");
-        
-        if( (file->Log_File) == NULL )
-        {
-            printf("\nError: Can't open file for output\n");
-            exit(0);
-        }
-        
-        pa_LogFileEntry( file, "Log file started");
-    }
-    return 0;
-}
-
-
-int pa_CloseLogFile( pa_log_file_t *file )
-{
-    if( (file->Log_File) != NULL )
-    {
-        pa_LogFileEntry(file, "Log file stopped" );
-        
-        fflush( file->Log_File );
-        fclose( file->Log_File );
-    }
     return 0;
 }
 
@@ -522,9 +579,10 @@ int main(int argc, char **argv)
     pa_timer_data_t *pa_timer_data  = (pa_timer_data_t *)   malloc( sizeof(pa_timer_data_t) );
     pa_log_file_t   *pa_log_file    = (pa_log_file_t *)     malloc( sizeof(pa_log_file_t)   );
     pa_data_file_t  *pa_data_file   = (pa_data_file_t *)    malloc( sizeof(pa_data_file_t)  );
+    pa_logger_t     *pa_logger      = (pa_logger_t *)       malloc( sizeof(pa_logger_t)     );
     
     
-    pa_InitVars( pa_config, pa_run_info, pa_timer_data, pa_log_file, pa_data_file );
+    pa_InitVars( pa_config, pa_run_info, pa_timer_data, pa_log_file, pa_data_file, pa_logger );
     
     
     if (ini_parse(argv[1], pa_config_handler, pa_config) != 0) {
@@ -585,9 +643,12 @@ int main(int argc, char **argv)
     
     pa_flags.Running = true;
     
-    pthread_t Timer_t_id, pa_DisplayInfo_t_id;
-    pthread_create(&Timer_t_id, NULL, Timer, (void*)pa_timer_data);
-    pthread_create(&pa_DisplayInfo_t_id, NULL, pa_DisplayInfo, (void*)pa_run_info);
+    pthread_t pa_Timer_thr_id;
+    pthread_t pa_DisplayInfo_thr_id;
+    pthread_t pa_Logger_thr_id;
+    pthread_create(&pa_Timer_thr_id,        NULL,   pa_Timer_thr,       (void*)pa_timer_data);
+    pthread_create(&pa_DisplayInfo_thr_id,  NULL,   pa_DisplayInfo_thr, (void*)pa_run_info);
+    pthread_create(&pa_Logger_thr_id,       NULL,   pa_Logger_thr,      (void*)pa_logger);
     
     int c_error_count=0;
     float avg_rate = 0;
@@ -673,7 +734,7 @@ int main(int argc, char **argv)
             }
         
 
-            pa_GetFileName( pa_data_file );
+            pa_GetFileName( pa_data_file, pa_log_file );
             
             fwrite(PulseData, sizeof(uint16_t), BuffSize, pa_data_file->Output_File );
  
@@ -713,22 +774,33 @@ int main(int argc, char **argv)
     
     pa_LogFileEntry( pa_log_file, "Acquisition stopped" );
     
+    pa_CloseDataFile( pa_data_file, pa_log_file );
+    
+    
     /* Final inform */
     
     avg_rate = (float) pa_run_info->n_pulses / (float)(*pa_run_info->Elapsed_Time_ptr);
     printf("\n|---------------------------------- TOTALS -----------------------------------|");
-    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i\n| Files writed:\t\t%7i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, avg_rate, pa_run_info->t_errors, *pa_run_info->File_Number_ptr);
+    printf("\n| Elapsed time:\t%11i s\n| Pulse count:\t%11" PRIu64 " \n| Average rate:\t%11.2f Hz\n| Files writed:\t%11i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, avg_rate, *pa_run_info->File_Number_ptr);
     printf("\n|-----------------------------------------------------------------------------|\n");
+    
+    
+    sprintf(log_entry, "Elapsed time: %7i s; Pulse count: %11" PRIu64 "; Average rate: %5.2f Hz; Files writed: %7i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, avg_rate, *pa_run_info->File_Number_ptr);
+    pa_LogFileEntry( pa_log_file, log_entry );
     
     /* Joining threads */
     
-    pthread_join(pa_DisplayInfo_t_id, NULL);
-    pthread_join(Timer_t_id, NULL);
+    pthread_join(   pa_Logger_thr_id,      NULL);
+    pthread_join(   pa_DisplayInfo_thr_id, NULL);
+    pthread_join(   pa_Timer_thr_id,       NULL);
+
     
-    /* Ending prosseses */
+    /* Releasing RP */
     
     pa_StopRP();
-    pa_CloseDataFile( pa_data_file );
+    
+    /* Closing log file */
+    
     pa_CloseLogFile( pa_log_file );
     
     /* Releasing resources */
@@ -739,7 +811,7 @@ int main(int argc, char **argv)
     free(pa_timer_data);
     free(pa_log_file);
     free(pa_data_file);
-    
+    free(pa_logger);
     
     return 0;
 }
