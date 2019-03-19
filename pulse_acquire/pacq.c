@@ -19,6 +19,7 @@
 
 typedef struct pa_config_s
 {
+    char        Config_File_Name[128];
     uint32_t    Pre_Trigger_Points;
     uint32_t    Pos_Trigger_Points;
     int32_t     Trigger_Level;
@@ -27,16 +28,16 @@ typedef struct pa_config_s
     char        File_Name_Prefix[20];
     char        File_Header_Comment[128];
     uint32_t    File_Time_Secs;
-    bool        Parse_errors;
+    bool        Parse_Errors;
 } pa_config_t;
 
 
 /* ADC acquisition bits mask. */
 static const int ADC_BITS_MAK = 0x3FFF;
 
-#define PRE_TRIGGER_POINTS  5
-#define POST_TRIGGER_POINTS 27
-#define CAPTURING_TIME_SEC  10
+//#define PRE_TRIGGER_POINTS  5
+//#define POST_TRIGGER_POINTS 27
+//#define CAPTURING_TIME_SEC  10
 //#define DATA_POINTS 64
 //#define DATA_POINTS_2 (DATA_POINTS/2)
 
@@ -47,54 +48,62 @@ typedef struct pa_flags_s
     bool ShowInfo; //Actualy unused
 } pa_flags_t;
 
-//volatile sig_atomic_t stop;
-
-
-
 
 typedef struct pa_run_info_s 
 {
     uint64_t n_pulses;
     uint32_t t_errors;
-    uint32_t e_time;
-    uint32_t n_file;
+    const uint32_t *Elapsed_Time_ptr;
+    const uint32_t *File_Number_ptr;
 } pa_run_info_t;
 
 
 typedef struct pa_timer_data_s
 {
-    uint32_t *T_time; // Pointer to capture time
-    uint32_t *E_time; // Pointer to elapsed time
+    uint32_t Elapsed_Time;
+    const uint32_t *Capture_Time_Secs_ptr; // Pointer to capture time
 } pa_timer_data_t;
 
 
-typedef struct pa_file_s
+typedef struct pa_data_file_s
 {
     FILE *Output_File;
-    uint32_t *e_time_ptr;
-    uint32_t *File_Time_Secs_ptr;
-    uint32_t *n_file_ptr;
-    char     *File_Name_Prefix_ptr;
-    char     *File_Header_Comment_ptr;
-    int32_t  *Trigger_Level_ptr;
+    char Output_File_Name[128];
+    uint32_t File_Number;
     time_t   i_time;
     uint32_t p_size;
     uint32_t cf_pulses;
-} pa_file_t;
+    const uint32_t *Elapsed_Time_ptr;
+    const uint32_t *File_Time_Secs_ptr;
+    const char     *File_Name_Prefix_ptr;
+    const char     *File_Header_Comment_ptr;
+    const int32_t  *Trigger_Level_ptr;
+} pa_data_file_t;
+
+typedef struct pa_log_file_s
+{
+    FILE *Log_File;
+    const char     *File_Name_Prefix_ptr;
+} pa_log_file_t;
+
+typedef struct pa_logger_s
+{
+    const pa_run_info_t *Run_Info_ptr;
+    const pa_log_file_t *Log_File_ptr;
+} pa_logger_t;
 
 /* Program flags must be globals */
 // This must be of type `volatile` to prevent
 // the compiler from optimizing away the
 // while loop condition.
 
-volatile pa_flags_t  pa_flags;
-
+volatile pa_flags_t pa_flags = { false, false };
 
 static int pa_config_handler(void* user, const char* section, const char* name,
                    const char* value)
 {
     pa_config_t* pconfig = (pa_config_t*)user;
-
+    
     #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
     if (MATCH("Capture", "Pre_Trigger_Points")) {
         int tmp = atoi(value);
@@ -103,7 +112,7 @@ static int pa_config_handler(void* user, const char* section, const char* name,
         else
         {
             printf("\nInvalid \"Pre_Trigger_Points\" value in config file (%i): Must be between 0 and %i\n", tmp, ADC_BUFFER_SIZE);
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
     } else if (MATCH("Capture", "Pos_Trigger_Points")) {
         int tmp = atoi(value);
@@ -112,7 +121,7 @@ static int pa_config_handler(void* user, const char* section, const char* name,
         else
         {
             printf("\nInvalid \"Pos_Trigger_Points\" value in config file (%i): Must be between 0 and %i\n", tmp, ADC_BUFFER_SIZE);
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
     } else if (MATCH("Capture", "Trigger_Level")) {
         int tmp = atoi(value);
@@ -121,7 +130,7 @@ static int pa_config_handler(void* user, const char* section, const char* name,
         else
         {
             printf("\nInvalid \"Trigger_Level\" value in config file (%i): Must be between -8192 and +8191\n",tmp);
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
     } else if (MATCH("Capture", "Trigger_Timeout_Secs")) {
         int tmp = atoi(value);
@@ -130,7 +139,7 @@ static int pa_config_handler(void* user, const char* section, const char* name,
         else
         {
             printf("\nInvalid \"Trigger_Timeout_Secs\" value in config file (%i): Must be greater than zero\n", tmp);
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
     } else if (MATCH("Capture", "Capture_Time_Secs")) {
         int tmp = atoi(value);
@@ -139,7 +148,7 @@ static int pa_config_handler(void* user, const char* section, const char* name,
         else
         {
             printf("\nInvalid \"Capture_Time_Secs\" value in config file (%i): can't be negative\n", tmp);
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
     } else if (MATCH("File", "File_Name_Prefix")) {
         char bad_chars[] = "/\0";
@@ -157,12 +166,12 @@ static int pa_config_handler(void* user, const char* section, const char* name,
             else
             {
                 printf("\nInvalid \"File_Name_Prefix\": File prefix must have less than 20 characters.\n");
-                pconfig->Parse_errors = true;
+                pconfig->Parse_Errors = true;
             }
         else
         {
             printf("\nInvalid \"File_Name_Prefix\": Ivalid character(s) for a file name used.\n");
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
     } else if (MATCH("File", "File_Header_Comment")) {
         if( strlen(value) < 121 )
@@ -170,7 +179,7 @@ static int pa_config_handler(void* user, const char* section, const char* name,
         else
         {
             printf("\nInvalid \"File_Header_Comment\": File prefix must have less than 120 characters.\n");
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
         
     } else if (MATCH("File", "File_Time_Secs")) {
@@ -180,10 +189,10 @@ static int pa_config_handler(void* user, const char* section, const char* name,
         else
         {
             printf("\nInvalid \"File_Time_Secs\" value in config file (%i): can't be negative\n", tmp);
-            pconfig->Parse_errors = true;
+            pconfig->Parse_Errors = true;
         }
     } else {
-        pconfig->Parse_errors = true;
+        pconfig->Parse_Errors = true;
         return 0;  /* unknown section/name, error */
     }
     return 1;
@@ -197,11 +206,10 @@ void inthand(int signum)
    pa_flags.Running = false;
 }
 
+
 // timer
-volatile bool ShowInfo = false;
 
-
-void *Timer( void *targs )
+void *pa_Timer_thr( void *targs )
 {
     pa_timer_data_t *timer_data = (pa_timer_data_t*)targs;
     struct timespec OneSec, Start_clock, Current_clock;
@@ -212,14 +220,14 @@ void *Timer( void *targs )
     {
         clock_nanosleep(CLOCK_REALTIME, 0, &OneSec, NULL);
         clock_gettime(CLOCK_REALTIME, &Current_clock);
-        *timer_data->E_time = Current_clock.tv_sec - Start_clock.tv_sec;
-        if( *timer_data->T_time > 0 )
-            if( *timer_data->E_time > ( *timer_data->T_time - 1 ) ) pa_flags.Running = false;
+        timer_data->Elapsed_Time = Current_clock.tv_sec - Start_clock.tv_sec;
+        if( *timer_data->Capture_Time_Secs_ptr > 0 )
+            if( timer_data->Elapsed_Time > ( *timer_data->Capture_Time_Secs_ptr - 1 ) ) pa_flags.Running = false;
     }
 }
 
 
-void *pa_DisplayInfo( void *targs)
+void *pa_DisplayInfo_thr( void *targs )
 {
     pa_run_info_t *pa_run_info = (pa_run_info_t*)targs;
     
@@ -230,47 +238,90 @@ void *pa_DisplayInfo( void *targs)
     {
         rate = (uint16_t)(pa_run_info->n_pulses - l_count);
         l_count = pa_run_info->n_pulses;
-        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | TEC:%7i | FN:%7i |", pa_run_info->e_time, pa_run_info->n_pulses, rate, pa_run_info->t_errors, pa_run_info->n_file);
+        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | FN:%7i |", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, rate, *pa_run_info->File_Number_ptr);
         fflush(stdout);
         sleep(1);
     }
     
 }
 
-
-int pa_SetDefaults( pa_config_t *config, volatile pa_flags_t *flags, pa_run_info_t *info, pa_timer_data_t *timer_data, pa_file_t *file )
+void *pa_Logger_thr( void *targs )
 {
-    config->Pre_Trigger_Points   = 5;
-    config->Pos_Trigger_Points   = 27;
-    config->Trigger_Level        = -819;
-    config->Trigger_Timeout_Secs = 5;
-    config->Capture_Time_Secs    = 1;
-    strcpy( config->File_Name_Prefix, "pa_out-");
-    strcpy( config->File_Header_Comment, "(None)");
-    config->File_Time_Secs       = 60;
-    config->Parse_errors         = false;
+    pa_logger_t *pa_logger = (pa_logger_t*)targs;
     
-    flags->Running  = false;
-    flags->ShowInfo = false;
+    if( pa_logger->Log_File_ptr->Log_File == NULL )
+    {
+        printf("Error: Log file not initialized");
+        exit(0);
+    }
     
-    info->n_pulses = 0;
-    info->t_errors = 0;
-    info->e_time   = 0;
-    info->n_file   = 0;
     
-    timer_data->T_time = &config->Capture_Time_Secs;
-    timer_data->E_time = &info->e_time;
+    char DateTime[20];
+    time_t tnow;
+    float rate = 0.0;
+    uint64_t l_count = 0;
+    int counter = 0;
+    sleep(1);
+
+    while( pa_flags.Running )
+    {
+        counter++;
+        if(counter == 60)
+        {
+            counter = 0;
+            tnow = time(NULL);
+            struct tm *t = localtime(&tnow);
+            strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S", t);
+            
+            rate = (float)(pa_logger->Run_Info_ptr->n_pulses - l_count)/60.0;
+            l_count = pa_logger->Run_Info_ptr->n_pulses;
+            fprintf(pa_logger->Log_File_ptr->Log_File,"M %s %11" PRIu64 " %5.2f\n",  DateTime, pa_logger->Run_Info_ptr->n_pulses, rate);
+            fflush(pa_logger->Log_File_ptr->Log_File);
+        }
+        sleep(1);
+    }
+}
+
+int pa_InitVars( pa_config_t *config, pa_run_info_t *info, pa_timer_data_t *timer_data, pa_log_file_t *log_file, pa_data_file_t *data_file, pa_logger_t *logger )
+{
     
-    file->Output_File        = NULL;
-    file->e_time_ptr         = &info->e_time;
-    file->File_Time_Secs_ptr = &config->File_Time_Secs;
-    file->File_Name_Prefix_ptr       = config->File_Name_Prefix;
-    file->File_Header_Comment_ptr    = config->File_Header_Comment;
-    file->n_file_ptr         = &info->n_file;
-    file->Trigger_Level_ptr  = &config->Trigger_Level;
-    file->i_time             = 0;
-    file->p_size             = 0;
-    file->cf_pulses          = 0;
+    strcpy( config->Config_File_Name,   "none.conf");
+    config->Pre_Trigger_Points          = 5;
+    config->Pos_Trigger_Points          = 27;
+    config->Trigger_Level               = -819;
+    config->Trigger_Timeout_Secs        = 5;
+    config->Capture_Time_Secs           = 1;
+    strcpy( config->File_Name_Prefix,   "pa");
+    strcpy( config->File_Header_Comment,"(None)");
+    config->File_Time_Secs              = 60;
+    config->Parse_Errors                = false;
+    
+    info->n_pulses                      = 0;
+    info->t_errors                      = 0;
+    info->Elapsed_Time_ptr              = &timer_data->Elapsed_Time;
+    info->File_Number_ptr               = &data_file->File_Number;
+    
+    timer_data->Elapsed_Time            = 0;
+    timer_data->Capture_Time_Secs_ptr   = &config->Capture_Time_Secs;
+    
+    log_file->Log_File                  = NULL;
+    log_file->File_Name_Prefix_ptr      = config->File_Name_Prefix;
+    
+    data_file->Output_File              = NULL;
+    strcpy( data_file->Output_File_Name,"none.paa");
+    data_file->File_Number              = 0;
+    data_file->i_time                   = 0;
+    data_file->p_size                   = 0;
+    data_file->cf_pulses                = 0;
+    data_file->Elapsed_Time_ptr         = &timer_data->Elapsed_Time;
+    data_file->File_Time_Secs_ptr       = &config->File_Time_Secs;
+    data_file->File_Name_Prefix_ptr     = config->File_Name_Prefix;
+    data_file->File_Header_Comment_ptr  = config->File_Header_Comment;
+    data_file->Trigger_Level_ptr        = &config->Trigger_Level;
+    
+    logger->Run_Info_ptr                = info;
+    logger->Log_File_ptr                = log_file;
+    
 
     return 0;
 }
@@ -284,8 +335,7 @@ int pa_CheckConfig( pa_config_t *config )
     return 0;
 }
 
-
-int pa_init()
+int pa_InitRP()
 {
     /* Init procedures */
     cmn_Init();
@@ -295,14 +345,14 @@ int pa_init()
     return 0;
 }
 
-int pa_stop()
+int pa_StopRP()
 {
     osc_Release();
     cmn_Release();
     return 0;
 }
 
-int pa_settings( pa_config_t *config )
+int pa_SettingsRP( pa_config_t *config )
 {
     /* Setting parameters */
 
@@ -336,8 +386,67 @@ int pa_settings( pa_config_t *config )
     return 0;
 }
 
+int pa_LogFileEntry( pa_log_file_t *file, const char *Entry )
+{
+    if( (file->Log_File) != NULL )
+    {
+        char DateTime[20];
+        time_t tnow = time(NULL);
+        struct tm *t = localtime(&tnow);
+        strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S", t);
+        
+        fprintf( file->Log_File , "I %s %s\n", DateTime, Entry );
+        fflush( file->Log_File );
+    }
+    return 0;
+}
 
-int pa_InitDataFile( pa_file_t *file )
+int pa_InitLogFile( pa_log_file_t *file )
+{
+    if( (file->Log_File) == NULL )
+    {
+     
+        char FileName[40];
+        strcpy(FileName, file->File_Name_Prefix_ptr);
+        strcat(FileName, "-run.log");
+    
+        file->Log_File = fopen(FileName, "w");
+        
+        if( (file->Log_File) == NULL )
+        {
+            printf("\nError: Can't open file for output\n");
+            exit(0);
+        }
+        
+        pa_LogFileEntry( file, "Log file started");
+        
+        char TZ[20];
+        time_t tnow = time(NULL);
+        struct tm *t = localtime(&tnow);
+        strftime(TZ, sizeof(TZ)-1, "%Z", t);
+        
+        char log_entry[200];
+        sprintf(log_entry, "Time Zone is %s", TZ);
+        pa_LogFileEntry( file, log_entry );
+    }
+    return 0;
+}
+
+
+int pa_CloseLogFile( pa_log_file_t *file )
+{
+    if( (file->Log_File) != NULL )
+    {
+        pa_LogFileEntry(file, "Log file stopped" );
+        
+        fflush( file->Log_File );
+        fclose( file->Log_File );
+    }
+    return 0;
+}
+
+
+int pa_InitDataFile( pa_data_file_t *file )
 {
     if( (file->Output_File) == NULL )
     {
@@ -364,16 +473,19 @@ int pa_InitDataFile( pa_file_t *file )
         
         file->cf_pulses = 0;
         
-        (*file->n_file_ptr)++;
+        file->File_Number++;
+        
+        
+        strcpy( file->Output_File_Name, FileName);
         
     }
     
     return 0;
 }
 
-int pa_CloseDataFile( pa_file_t *file )
+int pa_CloseDataFile( pa_data_file_t *data_file, pa_log_file_t *log_file )
 {
-    if( (file->Output_File) != NULL )
+    if( (data_file->Output_File) != NULL )
     {
         /*
          * Structure for PAA file
@@ -404,53 +516,56 @@ int pa_CloseDataFile( pa_file_t *file )
          */
         
         char itDateTime[30];
-        struct tm *it = localtime(&file->i_time);
+        struct tm *it = localtime(&data_file->i_time);
         strftime(itDateTime, sizeof(itDateTime)-1, "%c %Z", it);
         
-        fseek( file->Output_File, 0, SEEK_SET);
+        fseek( data_file->Output_File, 0, SEEK_SET);
         
-        fprintf(file->Output_File, "PAA 01\n");                                            //   7 bytes
+        fprintf(data_file->Output_File, "PAA 01\n");                                            //   7 bytes
                                                                 
         
-        fseek( file->Output_File, 8, SEEK_SET);
+        fseek( data_file->Output_File, 8, SEEK_SET);
         
-        fprintf(file->Output_File, "Pulse Acquire tool for Red Pitaya\n");                //  34 bytes
-        fprintf(file->Output_File, "Version: %d.%d.%d\n", _VERSION_MAJOR, _VERSION_MINOR, _VERSION_PATCH);
-                                                                                          //  19 bytes
-        fprintf(file->Output_File, "Build: %s\n", _BUILD);
-                                                                                          // 128 bytes
-        fprintf(file->Output_File, "%s\n",itDateTime);                                    //  29 bytes
-        fprintf(file->Output_File, "%s\n",file->File_Header_Comment_ptr);                 // 129 bytes
+        fprintf(data_file->Output_File, "Pulse Acquire tool for Red Pitaya\n");                //  34 bytes
+        fprintf(data_file->Output_File, "Version: %d.%d.%d\n", _VERSION_MAJOR, _VERSION_MINOR, _VERSION_PATCH);
+                                                                                               //  19 bytes
+        fprintf(data_file->Output_File, "Build: %s\n", _BUILD);
+                                                                                               // 128 bytes
+        fprintf(data_file->Output_File, "%s\n",itDateTime);                                    //  29 bytes
+        fprintf(data_file->Output_File, "%s\n",data_file->File_Header_Comment_ptr);            // 129 bytes
                                                                                           
-        fseek( file->Output_File, 520, SEEK_SET);
+        fseek( data_file->Output_File, 520, SEEK_SET);
         
         uint32_t eci = 0x10203040;
-        fwrite(&eci, sizeof(uint32_t), 1, file->Output_File );                           //    4 bytes
-        fwrite(&file->p_size, sizeof(uint32_t), 1, file->Output_File );                  //    4 bytes
-        fwrite(&file->cf_pulses, sizeof(uint32_t), 1, file->Output_File );               //    4 bytes
-        fwrite(file->Trigger_Level_ptr, sizeof(int32_t), 1, file->Output_File );        //    4 bytes
+        fwrite(&eci, sizeof(uint32_t), 1, data_file->Output_File );                           //    4 bytes
+        fwrite(&data_file->p_size, sizeof(uint32_t), 1, data_file->Output_File );             //    4 bytes
+        fwrite(&data_file->cf_pulses, sizeof(uint32_t), 1, data_file->Output_File );          //    4 bytes
+        fwrite(data_file->Trigger_Level_ptr, sizeof(int32_t), 1, data_file->Output_File );    //    4 bytes
                                                                            
-        fflush( file->Output_File );
-        fclose( file->Output_File );
+        fflush( data_file->Output_File );
+        fclose( data_file->Output_File );
         
-        file->Output_File = NULL;
+        data_file->Output_File = NULL;
+        
+        char log_entry[200];
+        sprintf(log_entry, "File %s writted with %d pulses", data_file->Output_File_Name, data_file->cf_pulses);
+        pa_LogFileEntry( log_file, log_entry );
     }
     
     return 0;
 }
 
 
-int pa_GetFileName( pa_file_t *file )
+int pa_GetFileName( pa_data_file_t *data_file, pa_log_file_t *log_file )
 {
-    if( *file->e_time_ptr > (*file->n_file_ptr)*(*file->File_Time_Secs_ptr) )
+    if( *data_file->Elapsed_Time_ptr > (data_file->File_Number)*(*data_file->File_Time_Secs_ptr) )
     {
-        pa_CloseDataFile( file );
-        pa_InitDataFile( file );
+        pa_CloseDataFile( data_file, log_file );
+        pa_InitDataFile( data_file );
     }
     
     return 0;
 }
-
 
 int main(int argc, char **argv)
 {
@@ -459,42 +574,49 @@ int main(int argc, char **argv)
         return 1;
     }
     
-    pa_config_t     pa_config;
-    pa_run_info_t   pa_run_info;
-    pa_timer_data_t pa_timer_data;
-    pa_file_t       pa_file;
+    pa_config_t     *pa_config      = (pa_config_t *)       malloc( sizeof(pa_config_t)     );
+    pa_run_info_t   *pa_run_info    = (pa_run_info_t *)     malloc( sizeof(pa_run_info_t)   );
+    pa_timer_data_t *pa_timer_data  = (pa_timer_data_t *)   malloc( sizeof(pa_timer_data_t) );
+    pa_log_file_t   *pa_log_file    = (pa_log_file_t *)     malloc( sizeof(pa_log_file_t)   );
+    pa_data_file_t  *pa_data_file   = (pa_data_file_t *)    malloc( sizeof(pa_data_file_t)  );
+    pa_logger_t     *pa_logger      = (pa_logger_t *)       malloc( sizeof(pa_logger_t)     );
     
     
-    pa_SetDefaults( &pa_config, &pa_flags, &pa_run_info, &pa_timer_data, &pa_file );
+    pa_InitVars( pa_config, pa_run_info, pa_timer_data, pa_log_file, pa_data_file, pa_logger );
     
     
-
-    if (ini_parse(argv[1], pa_config_handler, &pa_config) != 0) {
+    if (ini_parse(argv[1], pa_config_handler, pa_config) != 0) {
         printf("\nCan't load '%s' or has syntax errors\n\n",argv[1]);
         return 1;
     }
     
-    
-    if( pa_config.Parse_errors ){
+    if( pa_config->Parse_Errors ){
         printf("\nBad configuration file\n\n");
         return 1;
     }
     
-    if( pa_CheckConfig( &pa_config ) != 0 )
+    if( pa_CheckConfig( pa_config ) != 0 )
         return 1;
     
+    strcpy( pa_config->Config_File_Name, argv[1] );
+    
+    pa_InitLogFile(  pa_log_file );
+    
+    char log_entry[200];
+    sprintf(log_entry, "%s Configuration file loaded", argv[1]);
+    pa_LogFileEntry( pa_log_file, log_entry );
     
     printf("\n|--------------------------- Pulse Acquire Tool ------------------------------|");
     printf("\n| Configuration values");
     printf("\n| ====================");
-    printf("\n|   %-25s%i", "Pre_Trigger_Points:", pa_config.Pre_Trigger_Points);
-    printf("\n|   %-25s%i", "Pos_Trigger_Points:", pa_config.Pos_Trigger_Points);
-    printf("\n|   %-25s%i", "Trigger_Level:", pa_config.Trigger_Level);
-    printf("\n|   %-25s%i", "Trigger_Timeout_Secs:", pa_config.Trigger_Timeout_Secs);
-    printf("\n|   %-25s%i", "Capture_Time_Secs:", pa_config.Capture_Time_Secs);
-    printf("\n|   %-25s%s", "File_Name_Prefix:", pa_config.File_Name_Prefix);
-    printf("\n|   %-25s%s", "File_Header_Comment:", pa_config.File_Header_Comment);
-    printf("\n|   %-25s%i", "File_Time_Secs:", pa_config.File_Time_Secs);
+    printf("\n|   %-25s%i", "Pre_Trigger_Points:",      pa_config->Pre_Trigger_Points);
+    printf("\n|   %-25s%i", "Pos_Trigger_Points:",      pa_config->Pos_Trigger_Points);
+    printf("\n|   %-25s%i", "Trigger_Level:",           pa_config->Trigger_Level);
+    printf("\n|   %-25s%i", "Trigger_Timeout_Secs:",    pa_config->Trigger_Timeout_Secs);
+    printf("\n|   %-25s%i", "Capture_Time_Secs:",       pa_config->Capture_Time_Secs);
+    printf("\n|   %-25s%s", "File_Name_Prefix:",        pa_config->File_Name_Prefix);
+    printf("\n|   %-25s%s", "File_Header_Comment:",     pa_config->File_Header_Comment);
+    printf("\n|   %-25s%i", "File_Time_Secs:",          pa_config->File_Time_Secs);
     printf("\n|");
     printf("\n| Press CTRL-C to stop");
     printf("\n|");
@@ -506,23 +628,27 @@ int main(int argc, char **argv)
     
     signal(SIGINT, inthand);
     
-    const uint16_t BuffSize = pa_config.Pre_Trigger_Points + pa_config.Pos_Trigger_Points;
+    const uint16_t BuffSize = pa_config->Pre_Trigger_Points + pa_config->Pos_Trigger_Points;
     
     uint16_t *PulseData = (uint16_t *)malloc( sizeof(uint16_t) * BuffSize );
     
-    pa_file.p_size = BuffSize;
+    pa_data_file->p_size = BuffSize;
     
     
-    pa_init();
-    pa_settings( &pa_config );
+    pa_InitRP();
+    pa_SettingsRP( pa_config );
 
     
+    pa_LogFileEntry( pa_log_file, "Red Pitaya acquisition configured" );
     
     pa_flags.Running = true;
     
-    pthread_t Timer_t_id, pa_DisplayInfo_t_id;
-    pthread_create(&Timer_t_id, NULL, Timer, (void*)&pa_timer_data);
-    pthread_create(&pa_DisplayInfo_t_id, NULL, pa_DisplayInfo, (void*)&pa_run_info);
+    pthread_t pa_Timer_thr_id;
+    pthread_t pa_DisplayInfo_thr_id;
+    pthread_t pa_Logger_thr_id;
+    pthread_create(&pa_Timer_thr_id,        NULL,   pa_Timer_thr,       (void*)pa_timer_data);
+    pthread_create(&pa_DisplayInfo_thr_id,  NULL,   pa_DisplayInfo_thr, (void*)pa_run_info);
+    pthread_create(&pa_Logger_thr_id,       NULL,   pa_Logger_thr,      (void*)pa_logger);
     
     int c_error_count=0;
     float avg_rate = 0;
@@ -531,9 +657,11 @@ int main(int argc, char **argv)
     struct timespec LTClock, EClock;
     clock_gettime(CLOCK_REALTIME, &LTClock);
     
-    pa_InitDataFile( &pa_file );
+    pa_InitDataFile( pa_data_file );
     
-//     while( !stop )
+    
+    pa_LogFileEntry( pa_log_file, "Acquisition started" );
+    
     while( pa_flags.Running )
     {
         
@@ -546,7 +674,7 @@ int main(int argc, char **argv)
          */
         
         //usleep( MAX( (2*PRE_TRIGGER_POINTS*0.008), 1 ) );
-        usleep( MAX( (2*pa_config.Pre_Trigger_Points*0.008), 1 ) );
+        usleep( MAX( (2*pa_config->Pre_Trigger_Points*0.008), 1 ) );
 
         /* Set trigger source
          * By some unknow reason, trigger source MUST
@@ -580,7 +708,7 @@ int main(int argc, char **argv)
              * number of samples specifided in osc_SetTriggerDelay
              */
             
-            usleep( MAX( (2*pa_config.Pos_Trigger_Points*0.008), 1 ) );
+            usleep( MAX( (2*pa_config->Pos_Trigger_Points*0.008), 1 ) );
             
             /* After capturing all the samples specifided
              * in osc_SetTriggerDelay, memory write stops
@@ -594,10 +722,10 @@ int main(int argc, char **argv)
             osc_GetWritePointerAtTrig( &TriggerPoint );
  
 
-            if( TriggerPoint >  pa_config.Pre_Trigger_Points )
-                StartPoint = TriggerPoint - pa_config.Pre_Trigger_Points ;
+            if( TriggerPoint >  pa_config->Pre_Trigger_Points )
+                StartPoint = TriggerPoint - pa_config->Pre_Trigger_Points ;
             else
-                StartPoint = ADC_BUFFER_SIZE - pa_config.Pre_Trigger_Points + TriggerPoint;
+                StartPoint = ADC_BUFFER_SIZE - pa_config->Pre_Trigger_Points + TriggerPoint;
 
             const volatile uint32_t *buff = osc_GetDataBufferChA();
             
@@ -606,15 +734,15 @@ int main(int argc, char **argv)
             }
         
 
-            pa_GetFileName( &pa_file );
+            pa_GetFileName( pa_data_file, pa_log_file );
             
-            fwrite(PulseData, sizeof(uint16_t), BuffSize, pa_file.Output_File );
+            fwrite(PulseData, sizeof(uint16_t), BuffSize, pa_data_file->Output_File );
  
-            fflush( pa_file.Output_File );
+            fflush( pa_data_file->Output_File );
             
-            pa_file.cf_pulses++;
+            pa_data_file->cf_pulses++;
             
-            pa_run_info.n_pulses++;
+            pa_run_info->n_pulses++;
             
             clock_gettime(CLOCK_REALTIME, &LTClock);
         }
@@ -627,14 +755,15 @@ int main(int argc, char **argv)
              * aborted.
             */ 
         
-            pa_run_info.t_errors++;
+            pa_run_info->t_errors++;
             c_error_count++;
             if( (c_error_count % 35) == 0 ){
                 clock_gettime(CLOCK_REALTIME, &EClock);
                 uint16_t cttime = EClock.tv_sec - LTClock.tv_sec;
-                if( cttime > pa_config.Trigger_Timeout_Secs)
+                if( cttime > pa_config->Trigger_Timeout_Secs)
                 {
                     printf("\nTrigger timeout. Aborting...\n");
+                    pa_LogFileEntry( pa_log_file, "Trigger timeout: Stopping" );
                     pa_flags.Running = false;
                     break;
                 }
@@ -642,16 +771,48 @@ int main(int argc, char **argv)
         }
     }
     
-    /* Releasing resources */
-    pa_stop();
-    pa_CloseDataFile( &pa_file );
-    free(PulseData);
-    pthread_join(pa_DisplayInfo_t_id, NULL);
-    pthread_join(Timer_t_id, NULL);
-    avg_rate = (float) pa_run_info.n_pulses / (float)pa_run_info.e_time;
+    
+    pa_LogFileEntry( pa_log_file, "Acquisition stopped" );
+    
+    pa_CloseDataFile( pa_data_file, pa_log_file );
+    
+    
+    /* Final inform */
+    
+    avg_rate = (float) pa_run_info->n_pulses / (float)(*pa_run_info->Elapsed_Time_ptr);
     printf("\n|---------------------------------- TOTALS -----------------------------------|");
-    printf("\n| Elapsed time:\t\t%7i s\n| Pulse count:\t\t%7i \n| Average rate:\t\t%5.2f Hz\n| Trigger error count:\t%7i\n| Files writed:\t\t%7i", pa_run_info.e_time, pa_run_info.n_pulses, avg_rate, pa_run_info.t_errors, pa_run_info.n_file);
+    printf("\n| Elapsed time:\t%11i s\n| Pulse count:\t%11" PRIu64 " \n| Average rate:\t%11.2f Hz\n| Files writed:\t%11i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, avg_rate, *pa_run_info->File_Number_ptr);
     printf("\n|-----------------------------------------------------------------------------|\n");
+    
+    
+    sprintf(log_entry, "Elapsed time: %7i s; Pulse count: %11" PRIu64 "; Average rate: %5.2f Hz; Files writed: %7i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, avg_rate, *pa_run_info->File_Number_ptr);
+    pa_LogFileEntry( pa_log_file, log_entry );
+    
+    /* Joining threads */
+    
+    pthread_join(   pa_Logger_thr_id,      NULL);
+    pthread_join(   pa_DisplayInfo_thr_id, NULL);
+    pthread_join(   pa_Timer_thr_id,       NULL);
+
+    
+    /* Releasing RP */
+    
+    pa_StopRP();
+    
+    /* Closing log file */
+    
+    pa_CloseLogFile( pa_log_file );
+    
+    /* Releasing resources */
+    
+    free(PulseData);
+    free(pa_config);
+    free(pa_run_info);
+    free(pa_timer_data);
+    free(pa_log_file);
+    free(pa_data_file);
+    free(pa_logger);
+    
     return 0;
 }
 
