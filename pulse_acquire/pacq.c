@@ -749,10 +749,7 @@ int main(int argc, char **argv)
         else
         {
             /* If countout reaches 0, means that trigger
-             * was not raised. If this happens 5 times continuosly,
-             * acquisition conditons are reset. If
-             * happens 10 times, program execution is
-             * aborted.
+             * was not raised.
             */ 
         
             pa_run_info->t_errors++;
