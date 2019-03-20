@@ -1,5 +1,10 @@
-/* Red Pitaya C API example Acquiring a signal from a buffer  
- * This application acquires a signal on a specific channel */
+/*
+ * pacq.c
+ * 
+ * Pulse acquire utility for Red Pitaya.
+ * 
+ * 
+ */
 
 #include <stdio.h>
 #include <signal.h>

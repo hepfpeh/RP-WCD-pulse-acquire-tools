@@ -19,7 +19,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "rpecfm.h"
+#include "rp_m.h"
 
 #define ECHECK(x) { \
         int retval = (x); \

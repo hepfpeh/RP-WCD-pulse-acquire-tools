@@ -29,22 +29,9 @@ add_custom_target(generate_build
     VERBATIM
     )
 
-add_executable(pacq pacq.c ${rp_pa_sources} ${rp_pa_headers} ${PROJECT_BINARY_DIR}/build.h)
+add_executable(pacq main.c ${rp_pa_sources} ${rp_pa_headers} ${PROJECT_BINARY_DIR}/build.h)
 add_dependencies(pacq generate_build)
 target_link_libraries(pacq -lm -lpthread )
-
-#set(PACQ_SCRIPTS
-#    bgen.sh
-#    build.h
-#  )
-
-#foreach(_script ${PACQ_SCRIPTS})
-#  configure_file(
-#    ${PROJECT_SOURCE_DIR}/${_script}
-#    ${PROJECT_BINARY_DIR}/${_script}
-#    COPYONLY
-#    )
-#endforeach()
 
 configure_file( ${PROJECT_SOURCE_DIR}/bgen.sh
                 ${PROJECT_BINARY_DIR}/bgen.sh
