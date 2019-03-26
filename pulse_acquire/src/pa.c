@@ -147,9 +147,9 @@ void *pa_DisplayInfo_thr( void *targs )
     sleep(1);
     while( pa_flags.Running )
     {
-        rate = (uint16_t)(pa_run_info->n_pulses - l_count);
-        l_count = pa_run_info->n_pulses;
-        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | FN:%7i |", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, rate, *pa_run_info->File_Number_ptr);
+        rate = (uint16_t)(pa_run_info->Pulse_Count - l_count);
+        l_count = pa_run_info->Pulse_Count;
+        printf("\r| ET:%7i s | PC:%11" PRIu64 " | R:%5i Hz | FN:%7i |", *pa_run_info->Elapsed_Time_ptr, pa_run_info->Pulse_Count, rate, *pa_run_info->File_Number_ptr);
         fflush(stdout);
         sleep(1);
     }
@@ -188,16 +188,16 @@ void *pa_Logger_thr( void *targs )
             struct tm *t = localtime(&tnow);
             strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S", t);
             
-            m_rate = (float)(pa_logger->Run_Info_ptr->n_pulses - lm_count)/60.0;
-            lm_count = pa_logger->Run_Info_ptr->n_pulses;
+            m_rate = (float)(pa_logger->Run_Info_ptr->Pulse_Count - lm_count)/60.0;
+            lm_count = pa_logger->Run_Info_ptr->Pulse_Count;
             
-            s_rate = (float)(pa_logger->Run_Info_ptr->n_pulses - ls_count);
+            s_rate = (float)(pa_logger->Run_Info_ptr->Pulse_Count - ls_count);
             if( s_rate > s_rate_max ) s_rate_max = s_rate;
             if( s_rate < s_rate_min ) s_rate_min = s_rate;
             
-            ls_count = pa_logger->Run_Info_ptr->n_pulses;
+            ls_count = pa_logger->Run_Info_ptr->Pulse_Count;
             
-            fprintf(pa_logger->Log_File_ptr->Log_File,"M %s %11" PRIu64 " %5.2f %5.2f %5.2f\n",  DateTime, pa_logger->Run_Info_ptr->n_pulses, m_rate, s_rate_max, s_rate_min );
+            fprintf(pa_logger->Log_File_ptr->Log_File,"M %s %11" PRIu64 " %5.2f %5.2f %5.2f\n",  DateTime, pa_logger->Run_Info_ptr->Pulse_Count, m_rate, s_rate_max, s_rate_min );
             fflush(pa_logger->Log_File_ptr->Log_File);
             
             
@@ -206,11 +206,11 @@ void *pa_Logger_thr( void *targs )
     
         } else
         {
-            s_rate = (float)(pa_logger->Run_Info_ptr->n_pulses - ls_count);
+            s_rate = (float)(pa_logger->Run_Info_ptr->Pulse_Count - ls_count);
             if( s_rate > s_rate_max ) s_rate_max = s_rate;
             if( s_rate < s_rate_min ) s_rate_min = s_rate;
             
-            ls_count = pa_logger->Run_Info_ptr->n_pulses;
+            ls_count = pa_logger->Run_Info_ptr->Pulse_Count;
             
         }
         sleep(1);
@@ -231,8 +231,8 @@ int pa_InitVars( pa_config_t *config, pa_run_info_t *info, pa_timer_data_t *time
     config->File_Time_Secs              = 60;
     config->Parse_Errors                = false;
     
-    info->n_pulses                      = 0;
-    info->t_errors                      = 0;
+    info->Pulse_Count                   = 0;
+    info->Trigger_Countout              = 0;
     info->Elapsed_Time_ptr              = &timer_data->Elapsed_Time;
     info->File_Number_ptr               = &data_file->File_Number;
     
@@ -245,9 +245,9 @@ int pa_InitVars( pa_config_t *config, pa_run_info_t *info, pa_timer_data_t *time
     data_file->Output_File              = NULL;
     strcpy( data_file->Output_File_Name,"none.paa");
     data_file->File_Number              = 0;
-    data_file->i_time                   = 0;
-    data_file->p_size                   = 0;
-    data_file->cf_pulses                = 0;
+    data_file->Init_Time                = 0;
+    data_file->Pulse_Size               = 0;
+    data_file->File_Pulse_Count         = 0;
     data_file->Elapsed_Time_ptr         = &timer_data->Elapsed_Time;
     data_file->File_Time_Secs_ptr       = &config->File_Time_Secs;
     data_file->File_Name_Prefix_ptr     = config->File_Name_Prefix;
@@ -386,8 +386,8 @@ int pa_InitDataFile( pa_data_file_t *file )
     if( (file->Output_File) == NULL )
     {
         char DateTime[15];
-        file->i_time = time(NULL);
-        struct tm *t = localtime(&file->i_time);
+        file->Init_Time = time(NULL);
+        struct tm *t = localtime(&file->Init_Time);
         strftime(DateTime, sizeof(DateTime)-1, "%d%m%y-%H%M%S", t);
     
         char FileName[40];
@@ -406,7 +406,7 @@ int pa_InitDataFile( pa_data_file_t *file )
         
         fseek( file->Output_File, 640, SEEK_SET);
         
-        file->cf_pulses = 0;
+        file->File_Pulse_Count = 0;
         
         file->File_Number++;
         
@@ -451,7 +451,7 @@ int pa_CloseDataFile( pa_data_file_t *data_file, pa_log_file_t *log_file )
          */
         
         char itDateTime[30];
-        struct tm *it = localtime(&data_file->i_time);
+        struct tm *it = localtime(&data_file->Init_Time);
         strftime(itDateTime, sizeof(itDateTime)-1, "%c %Z", it);
         
         fseek( data_file->Output_File, 0, SEEK_SET);
@@ -473,8 +473,8 @@ int pa_CloseDataFile( pa_data_file_t *data_file, pa_log_file_t *log_file )
         
         uint32_t eci = 0x10203040;
         fwrite(&eci, sizeof(uint32_t), 1, data_file->Output_File );                           //    4 bytes
-        fwrite(&data_file->p_size, sizeof(uint32_t), 1, data_file->Output_File );             //    4 bytes
-        fwrite(&data_file->cf_pulses, sizeof(uint32_t), 1, data_file->Output_File );          //    4 bytes
+        fwrite(&data_file->Pulse_Size, sizeof(uint32_t), 1, data_file->Output_File );             //    4 bytes
+        fwrite(&data_file->File_Pulse_Count, sizeof(uint32_t), 1, data_file->Output_File );          //    4 bytes
         fwrite(data_file->Trigger_Level_ptr, sizeof(int32_t), 1, data_file->Output_File );    //    4 bytes
                                                                            
         fflush( data_file->Output_File );
@@ -483,7 +483,7 @@ int pa_CloseDataFile( pa_data_file_t *data_file, pa_log_file_t *log_file )
         data_file->Output_File = NULL;
         
         char log_entry[200];
-        sprintf(log_entry, "File %s writted with %d pulses", data_file->Output_File_Name, data_file->cf_pulses);
+        sprintf(log_entry, "File %s writted with %d pulses", data_file->Output_File_Name, data_file->File_Pulse_Count);
         pa_LogFileEntry( log_file, log_entry );
     }
     

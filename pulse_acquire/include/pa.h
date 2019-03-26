@@ -54,8 +54,8 @@ typedef struct pa_flags_s
  */
 typedef struct pa_run_info_s 
 {
-    uint64_t n_pulses;
-    uint32_t t_errors;
+    uint64_t Pulse_Count;
+    uint32_t Trigger_Countout;
     const uint32_t *Elapsed_Time_ptr;
     const uint32_t *File_Number_ptr;
 } pa_run_info_t;
@@ -82,9 +82,9 @@ typedef struct pa_data_file_s
     FILE *Output_File;
     char Output_File_Name[128];
     uint32_t File_Number;
-    time_t   i_time;
-    uint32_t p_size;
-    uint32_t cf_pulses;
+    time_t   Init_Time;
+    uint32_t Pulse_Size;
+    uint32_t File_Pulse_Count;
     const uint32_t *Elapsed_Time_ptr;
     const uint32_t *File_Time_Secs_ptr;
     const char     *File_Name_Prefix_ptr;

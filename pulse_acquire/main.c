@@ -95,7 +95,7 @@ int main(int argc, char **argv)
     
     uint16_t *PulseData = (uint16_t *)malloc( sizeof(uint16_t) * BuffSize );
     
-    pa_data_file->p_size = BuffSize;
+    pa_data_file->Pulse_Size = BuffSize;
     
     
     pa_InitRP();
@@ -203,9 +203,9 @@ int main(int argc, char **argv)
  
             fflush( pa_data_file->Output_File );
             
-            pa_data_file->cf_pulses++;
+            pa_data_file->File_Pulse_Count++;
             
-            pa_run_info->n_pulses++;
+            pa_run_info->Pulse_Count++;
             
             clock_gettime(CLOCK_REALTIME, &LTClock);
         }
@@ -215,7 +215,7 @@ int main(int argc, char **argv)
              * was not raised.
             */ 
         
-            pa_run_info->t_errors++;
+            pa_run_info->Trigger_Countout++;
             c_error_count++;
             if( (c_error_count % 35) == 0 ){
                 clock_gettime(CLOCK_REALTIME, &EClock);
@@ -239,13 +239,13 @@ int main(int argc, char **argv)
     
     /* Final inform */
     
-    avg_rate = (float) pa_run_info->n_pulses / (float)(*pa_run_info->Elapsed_Time_ptr);
+    avg_rate = (float) pa_run_info->Pulse_Count / (float)(*pa_run_info->Elapsed_Time_ptr);
     printf("\n|---------------------------------- TOTALS -----------------------------------|");
-    printf("\n| Elapsed time:\t%11i s\n| Pulse count:\t%11" PRIu64 " \n| Average rate:\t%11.2f Hz\n| Files writed:\t%11i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, avg_rate, *pa_run_info->File_Number_ptr);
+    printf("\n| Elapsed time:\t%11i s\n| Pulse count:\t%11" PRIu64 " \n| Average rate:\t%11.2f Hz\n| Files writed:\t%11i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->Pulse_Count, avg_rate, *pa_run_info->File_Number_ptr);
     printf("\n|-----------------------------------------------------------------------------|\n");
     
     
-    sprintf(log_entry, "Elapsed time: %7i s; Pulse count: %11" PRIu64 "; Average rate: %5.2f Hz; Files writed: %7i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->n_pulses, avg_rate, *pa_run_info->File_Number_ptr);
+    sprintf(log_entry, "Elapsed time: %7i s; Pulse count: %11" PRIu64 "; Average rate: %5.2f Hz; Files writed: %7i", *pa_run_info->Elapsed_Time_ptr, pa_run_info->Pulse_Count, avg_rate, *pa_run_info->File_Number_ptr);
     pa_LogFileEntry( pa_log_file, log_entry );
     
     /* Joining threads */
