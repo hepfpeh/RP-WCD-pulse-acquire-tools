@@ -120,8 +120,6 @@ int pa_config_handler(void* user, const char* section, const char* name, const c
     return 1;
 }
 
-// timer
-
 void *pa_Timer_thr( void *targs )
 {
     pa_timer_data_t *timer_data = (pa_timer_data_t*)targs;
@@ -171,8 +169,12 @@ void *pa_Logger_thr( void *targs )
     
     char DateTime[20];
     time_t tnow;
-    float rate = 0.0;
-    uint64_t l_count = 0;
+    float s_rate = 0.0;
+    float m_rate = 0.0;
+    float s_rate_min = 1e10;
+    float s_rate_max = 0.0;
+    uint64_t ls_count = 0;
+    uint64_t lm_count = 0;
     int counter = 0;
     sleep(1);
 
@@ -186,10 +188,30 @@ void *pa_Logger_thr( void *targs )
             struct tm *t = localtime(&tnow);
             strftime(DateTime, sizeof(DateTime)-1, "%d%m%y %H%M%S", t);
             
-            rate = (float)(pa_logger->Run_Info_ptr->n_pulses - l_count)/60.0;
-            l_count = pa_logger->Run_Info_ptr->n_pulses;
-            fprintf(pa_logger->Log_File_ptr->Log_File,"M %s %11" PRIu64 " %5.2f\n",  DateTime, pa_logger->Run_Info_ptr->n_pulses, rate);
+            m_rate = (float)(pa_logger->Run_Info_ptr->n_pulses - lm_count)/60.0;
+            lm_count = pa_logger->Run_Info_ptr->n_pulses;
+            
+            s_rate = (float)(pa_logger->Run_Info_ptr->n_pulses - ls_count);
+            if( s_rate > s_rate_max ) s_rate_max = s_rate;
+            if( s_rate < s_rate_min ) s_rate_min = s_rate;
+            
+            ls_count = pa_logger->Run_Info_ptr->n_pulses;
+            
+            fprintf(pa_logger->Log_File_ptr->Log_File,"M %s %11" PRIu64 " %5.2f %5.2f %5.2f\n",  DateTime, pa_logger->Run_Info_ptr->n_pulses, m_rate, s_rate_max, s_rate_min );
             fflush(pa_logger->Log_File_ptr->Log_File);
+            
+            
+            s_rate_min = 1e10;
+            s_rate_max = 0.0;
+    
+        } else
+        {
+            s_rate = (float)(pa_logger->Run_Info_ptr->n_pulses - ls_count);
+            if( s_rate > s_rate_max ) s_rate_max = s_rate;
+            if( s_rate < s_rate_min ) s_rate_min = s_rate;
+            
+            ls_count = pa_logger->Run_Info_ptr->n_pulses;
+            
         }
         sleep(1);
     }
