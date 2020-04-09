@@ -56,6 +56,9 @@ class paaFile:
         if( (file_length_in_bytes-640)/(2*self.ps) != float(self.pc) ):
             print("Error: Binary data size is not coherent")
             sys.exit()
+            
+    def __del__(self): 
+        self.file.close() 
         
     def paaGetTextHeader(self,header):
         return self.t_header[header]
@@ -69,7 +72,27 @@ class paaFile:
     def paaGetThresholdLevel(self):
         return self.tl
     
-    def paaGetPulse(self,pulse_number):
+    def paaGetPulseRP(self,pulse_number):
+        if( ( pulse_number < 0 ) or (pulse_number > (self.pc-1) )):
+            print("Error: Bad pulse number")
+            sys.exit()
+        offset = 640 + 2*self.ps*(pulse_number)
+        self.file.seek(offset, 0)
+        pulse_data = []
+        for i in range(self.ps):
+            ipoint = struct.unpack('<H', self.file.read(2))[0]
+            # Data from RedPitaya that uses SteamLab 0.97 API,
+            # ie Pulse Aquire pacq, comes in 14 bit signed
+            # integers. The following convertion is needed.
+            if( ipoint > 8191 ):
+                ipoint = ipoint - 16384
+            pulse_data.append(ipoint)
+        return pulse_data
+    
+    # Use this method to read data that does not comes
+    # from Pulse Aquire pacq utility.
+    
+    def paaGetPulseRaw(self,pulse_number):
         if( ( pulse_number < 0 ) or (pulse_number > (self.pc-1) )):
             print("Error: Bad pulse number")
             sys.exit()

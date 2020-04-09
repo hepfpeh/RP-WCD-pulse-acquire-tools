@@ -17,20 +17,45 @@ if( len(sys.argv) < 2 ):
 DataFile = paaFile( sys.argv[1] )
 
 print( DataFile.paaGetTextHeader(0) )
+print( DataFile.paaGetTextHeader(1) )
+print( DataFile.paaGetTextHeader(2) )
+print( DataFile.paaGetTextHeader(3) )
+print( DataFile.paaGetTextHeader(4) )
+
 
 ps = DataFile.paaGetPulseSize()
+pc = DataFile.paaGetPulseCount()
+tl = DataFile.paaGetThresholdLevel()
+
+print("Points per pulse: ", ps)
+print("Pulses in this file: ", pc)
+print("threshold level: ", tl)
+print()
 
 pulse_data_t = list(range( ps ))
-pulse_data_v = DataFile.paaGetPulse(10)
-plt.plot(pulse_data_t, pulse_data_v)
 
-tl = DataFile.paaGetThresholdLevel()
-if( tl < 0):
-    tly = 16384+tl
-else:
-    tly = tl
+while(1):
+    try:
+        pulse_number = int(input('Pulse number to plot: '))
+    except ValueError:
+        print("Not a number")
+        sys.exit(0)
+    except KeyboardInterrupt:
+        print()
+        sys.exit()
+    if( ( pulse_number < 0 ) or (pulse_number > (pc-1) )):
+        print("Error: Bad pulse number")
+        sys.exit(0)
+    pulse_data_v = DataFile.paaGetPulseRP(pulse_number)
+    # For paa files generated from other sources than
+    # pacq on a RedPitaya, use paaGetPulseRaw()
+    #
+    #pulse_data_v = DataFile.paaGetPulseRaw(10)
+    #
     
-ax = plt.gca()
-ax.add_line( mlines.Line2D([0,ps-1], [tly,tly] ) )
-
-plt.show()
+    plt.plot(pulse_data_t, pulse_data_v)
+        
+    ax = plt.gca()
+    ax.add_line( mlines.Line2D([0,ps-1], [tl,tl] ) )
+    
+    plt.show()
