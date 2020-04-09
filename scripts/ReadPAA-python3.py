@@ -48,9 +48,9 @@ while(1):
         sys.exit(0)
     pulse_data_v = DataFile.paaGetPulseRP(pulse_number)
     # For paa files generated from other sources than
-    # pacq on a RedPitaya, use paaGetPulseRaw()
+    # pacq on a RedPitaya, use paaGetPulseRaw() instead.
     #
-    #pulse_data_v = DataFile.paaGetPulseRaw(10)
+    #pulse_data_v = DataFile.paaGetPulseRaw(pulse_number)
     #
     
     plt.plot(pulse_data_t, pulse_data_v)
