@@ -4,6 +4,10 @@
  * @author: Héctor Pérez
  * date: 04/08/2020
  * 
+ * Usage:
+ * 1. Load this file into root with .L
+ * 2. Call the function GetPAAPulse( "FileName.paa", <pulse number> );
+ *
  */ 
 
 #include "TGraph.h"
