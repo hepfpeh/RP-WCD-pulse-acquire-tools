@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdint.h>
-#include "font.h"
+//#include "font.h"
 
 #define OLED96_ADDR     0x3c
 #define PAGESIZE        32

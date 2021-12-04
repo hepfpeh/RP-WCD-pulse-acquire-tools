@@ -9,7 +9,7 @@
 #include <string.h>
 #include <errno.h>
 #include <stdint.h>
-#include "font.h"
+//#include "font.h"
 #include "functions.h"
 
 int main(int argc, char **argv){
