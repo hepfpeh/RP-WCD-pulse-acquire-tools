@@ -36,3 +36,7 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
+# python precompiled
+__pycache__/
+*.py[cod]
+
