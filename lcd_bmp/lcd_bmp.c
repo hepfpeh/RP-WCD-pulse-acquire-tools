@@ -1,4 +1,3 @@
-#include "bmp180.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -9,22 +8,21 @@
 #include <string.h>
 #include <errno.h>
 #include <stdint.h>
-#include "font.h"
 #include "functions.h"
 
 int main(int argc, char **argv){
 	
-    inic_disp();
+    fun_inic_disp();
 	
 	if(bmp != NULL){
 		int i;
-		Bienvenida(fd,0x32,0x00);
+		fun_bienv(fd);
 		for(i = 0; i < 25; i++) {
-			datos(bmp, fd);
+			fun_data(bmp, fd);			
 		}
 	}
 	
-	close_disp(bmp,fd);
+	fun_close_disp(bmp,fd);
 
 	return 0;
 }

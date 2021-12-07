@@ -46,6 +46,14 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 
+void colon(int fd){
+    i2c_smbus_write_byte_data(fd, SET_START_LINE, 0x00);
+    i2c_smbus_write_byte_data(fd, SET_START_LINE, 0x36);
+    i2c_smbus_write_byte_data(fd, SET_START_LINE, 0x36);
+    i2c_smbus_write_byte_data(fd, SET_START_LINE, 0x00);
+    i2c_smbus_write_byte_data(fd, SET_START_LINE, 0x00);   
+}
+
 void asterisk(int fd){
     i2c_smbus_write_byte_data(fd, SET_START_LINE, 0x14);
     i2c_smbus_write_byte_data(fd, SET_START_LINE, 0x08);
